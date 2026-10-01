@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PAPTECH - Gestão Comercial</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
   :root {
     --bg-app-1: #FFFFFF;
@@ -117,6 +118,16 @@
   .sidebar-usuario-info .usuario-nivel { color: var(--texto-suave); font-weight: 400; font-size: 11px; display: block; margin-bottom: 8px; }
   .sidebar-usuario-info .btn-sair { width: 100%; background: #FFFFFF; border: 1px solid var(--perigo); color: var(--perigo); border-radius: 8px; padding: 7px 10px; font-size: 13px; cursor: pointer; font-family: inherit; }
   .sidebar-usuario-info .btn-sair:hover { background: var(--perigo); color: #fff; }
+
+  .indicador-sync { margin-top: 10px; font-size: 11.5px; text-align: center; padding: 5px 8px; border-radius: 8px; }
+  .indicador-sync.sync-ok { background: rgba(46,125,50,0.1); color: var(--accent-2); }
+  .indicador-sync.sync-erro { background: rgba(184,134,11,0.12); color: #8A6400; }
+  .indicador-sync.sync-off { background: rgba(0,0,0,0.04); color: var(--texto-suave); }
+
+  .tela-carregando { position: fixed; inset: 0; z-index: 3000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: linear-gradient(135deg, #F2F7F2, #FFFFFF); }
+  .tela-carregando .spinner { width: 34px; height: 34px; border: 4px solid var(--borda); border-top-color: var(--accent); border-radius: 50%; animation: girar 0.8s linear infinite; }
+  .tela-carregando .texto { color: var(--texto-suave); font-size: 13.5px; }
+  @keyframes girar { to { transform: rotate(360deg); } }
 
   .permissoes-grade { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px 14px; margin: 6px 0 14px; }
   .permissao-item { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--texto); }
@@ -234,6 +245,11 @@
 
 <div id="marca-dagua-fundo" class="marca-dagua"></div>
 
+<div id="tela-carregando" class="tela-carregando">
+  <div class="spinner"></div>
+  <div class="texto">Sincronizando dados...</div>
+</div>
+
 <div id="tela-login" class="tela-login" style="display:none">
   <form class="login-card" onsubmit="return tentarLogin(event)">
     <div class="login-logo">PAP<span>TECH</span></div>
@@ -270,6 +286,7 @@
     <button class="nav-btn" data-section="backup"><span class="icone">💾</span>Backup / Restauração</button>
     <button class="nav-btn" data-section="configuracoes"><span class="icone">⚙️</span>Configurações</button>
     <div id="sidebar-usuario-info" class="sidebar-usuario-info"></div>
+    <div id="indicador-sync" class="indicador-sync"></div>
   </nav>
   <main class="content">
     <section id="sec-dashboard" class="section"></section>
@@ -338,6 +355,95 @@ const SECOES_PERMISSAO = [
 ];
 const CHAVE_SESSAO_USUARIO = 'westech_sessao_usuario_id';
 
+/* ---------- banco de dados online (Supabase) ---------- */
+/* Preencha estes dois valores com os dados do seu projeto Supabase
+   (Project Settings -> API: "Project URL" e a chave "anon public").
+   Enquanto estiverem em branco, o sistema funciona normalmente, só que
+   100% local (como antes), sem compartilhar dados entre computadores. */
+const SUPABASE_URL = '';
+const SUPABASE_ANON_KEY = '';
+
+const supabaseClient = (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase)
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  : null;
+
+function nuvemConfigurada() {
+  return !!supabaseClient;
+}
+
+function atualizarIndicadorSync(status, mensagem) {
+  const el = document.getElementById('indicador-sync');
+  if (!el) return;
+  el.className = 'indicador-sync ' + (status === 'ok' ? 'sync-ok' : status === 'erro' ? 'sync-erro' : 'sync-off');
+  const textos = {
+    ok: '☁ Sincronizado',
+    erro: '⚠ Sem conexão com a nuvem',
+    off: '☁ Somente local (nuvem não configurada)',
+  };
+  el.textContent = mensagem || textos[status] || '';
+}
+
+/* Busca TODAS as coleções na nuvem de uma vez e sobrescreve o localStorage
+   local com o que estiver lá — a nuvem passa a ser a fonte da verdade.
+   Chamado uma vez, ao abrir a página, antes de decidir login/painel. */
+async function sincronizarComNuvem() {
+  if (!nuvemConfigurada()) {
+    atualizarIndicadorSync('off');
+    return;
+  }
+  try {
+    const { data, error } = await supabaseClient.from('registros').select('colecao, dados');
+    if (error) throw error;
+
+    const porColecao = {};
+    Object.keys(STORAGE_KEYS).forEach(chave => { porColecao[chave] = []; });
+    (data || []).forEach(linha => {
+      if (porColecao[linha.colecao]) porColecao[linha.colecao].push(linha.dados);
+    });
+    Object.keys(porColecao).forEach(chave => {
+      localStorage.setItem(STORAGE_KEYS[chave], JSON.stringify(porColecao[chave]));
+    });
+    atualizarIndicadorSync('ok');
+  } catch (erro) {
+    console.warn('Não foi possível sincronizar com a nuvem, usando dados locais:', erro);
+    atualizarIndicadorSync('erro');
+  }
+}
+
+/* Envia uma coleção inteira para a nuvem: grava/atualiza cada item da lista
+   e apaga da nuvem qualquer item que não esteja mais nela (mesmo padrão de
+   "substituir o array inteiro" que o resto do app já usa). Roda em segundo
+   plano, sem travar a tela — se falhar, só avisa, não desfaz o salvamento
+   local (que já aconteceu antes desta chamada). */
+async function enviarParaNuvem(chave, lista) {
+  if (!nuvemConfigurada()) return;
+  try {
+    const linhas = lista.filter(item => item && item.id != null).map(item => ({
+      colecao: chave,
+      registro_id: item.id,
+      dados: item,
+    }));
+
+    if (linhas.length) {
+      const { error: erroUpsert } = await supabaseClient
+        .from('registros')
+        .upsert(linhas, { onConflict: 'colecao,registro_id' });
+      if (erroUpsert) throw erroUpsert;
+    }
+
+    const idsAtuais = lista.map(item => item.id).filter(id => id != null);
+    let queryDelete = supabaseClient.from('registros').delete().eq('colecao', chave);
+    queryDelete = idsAtuais.length ? queryDelete.not('registro_id', 'in', `(${idsAtuais.join(',')})` ) : queryDelete;
+    const { error: erroDelete } = await queryDelete;
+    if (erroDelete) throw erroDelete;
+
+    atualizarIndicadorSync('ok');
+  } catch (erro) {
+    console.warn(`Não foi possível enviar "${chave}" para a nuvem:`, erro);
+    atualizarIndicadorSync('erro');
+  }
+}
+
 let itensCompraTemp = [];
 let itensVendaTemp = [];
 let produtoSelecionadoVenda = null;
@@ -357,6 +463,8 @@ function loadList(chave) {
 
 function saveList(chave, lista) {
   localStorage.setItem(STORAGE_KEYS[chave], JSON.stringify(lista));
+  // Envia para a nuvem em segundo plano (não espera/bloqueia a tela).
+  enviarParaNuvem(chave, lista);
 }
 
 function nextId(lista) {
@@ -4389,7 +4497,10 @@ function renderDashboard() {
 
 /* ---------- inicializacao ---------- */
 
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
+  await sincronizarComNuvem();
+  document.getElementById('tela-carregando').style.display = 'none';
+
   inicializarUsuariosPadrao();
   aplicarMarcaDaguaNaTela();
   if (usuarioLogado()) {
