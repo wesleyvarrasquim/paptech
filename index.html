@@ -103,6 +103,16 @@
   .modal-overlay { position: fixed; inset: 0; background: rgba(20,30,20,0.45); display: none; align-items: center; justify-content: center; z-index: 1000; padding: 20px; }
   .modal { background: #FFFFFF; border: 1px solid var(--borda); box-shadow: 0 10px 40px rgba(0,0,0,0.18); border-radius: 16px; padding: 26px; width: 100%; max-width: 560px; max-height: 88vh; overflow-y: auto; color: var(--texto); }
   .modal h2 { color: var(--accent-2); margin-top: 0; }
+  .modal.modal-largo { max-width: 920px; }
+
+  .produto-modal-layout { display: flex; gap: 22px; align-items: flex-start; }
+  .produto-modal-principal { flex: 1; min-width: 0; }
+  .produto-foto-painel { width: 220px; flex-shrink: 0; position: sticky; top: 0; display: flex; flex-direction: column; gap: 8px; }
+  .produto-foto-painel label { font-size: 12.5px; color: var(--texto-suave); }
+  .produto-foto-preview-wrap { width: 100%; aspect-ratio: 1; border: 1px solid var(--borda); border-radius: 12px; background: #F7FBF7; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .produto-foto-preview { width: 100%; height: 100%; object-fit: cover; }
+  .produto-foto-placeholder { color: var(--texto-suave); font-size: 12.5px; text-align: center; padding: 10px; }
+  .produto-foto-botao { width: 100%; }
 
   .tela-login { position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at 20% 20%, rgba(46,125,50,0.08), transparent 55%), linear-gradient(135deg, #F2F7F2, #FFFFFF); padding: 20px; }
   .login-card { background: #FFFFFF; border: 1px solid var(--borda); border-radius: 16px; padding: 36px 32px; width: 100%; max-width: 360px; box-shadow: 0 10px 40px rgba(0,0,0,0.1); }
@@ -238,6 +248,8 @@
     .sidebar .logo { padding: 6px 14px; white-space: nowrap; }
     .nav-btn { padding: 12px 14px; white-space: nowrap; }
     .content { padding: 18px; }
+    .produto-modal-layout { flex-direction: column; }
+    .produto-foto-painel { width: 100%; position: static; }
   }
 </style>
 </head>
@@ -450,6 +462,7 @@ let produtoSelecionadoVenda = null;
 let produtoSelecionadoCompra = null;
 let produtoSelecionadoMovimento = null;
 let similaresProdutoTemp = [];
+let fotoProdutoTemp = null;
 
 /* ---------- utilidades gerais ---------- */
 
@@ -506,14 +519,17 @@ function formatarDataBr(data) {
 
 /* ---------- modal ---------- */
 
-function abrirModal(html) {
-  document.getElementById('modal-box').innerHTML = html;
+function abrirModal(html, classeExtra) {
+  const caixa = document.getElementById('modal-box');
+  caixa.innerHTML = html;
+  caixa.className = 'modal' + (classeExtra ? ' ' + classeExtra : '');
   document.getElementById('modal-overlay').style.display = 'flex';
 }
 
 function fecharModal() {
   document.getElementById('modal-overlay').style.display = 'none';
   document.getElementById('modal-box').innerHTML = '';
+  document.getElementById('modal-box').className = 'modal';
 }
 
 document.getElementById('modal-overlay').addEventListener('click', function (e) {
@@ -1081,6 +1097,7 @@ function abrirFormProduto(id) {
   similaresProdutoTemp = registro && Array.isArray(registro.similares)
     ? registro.similares.map(item => typeof item === 'string' ? { codigo: item, marca: '' } : { codigo: (item && item.codigo) || '', marca: (item && item.marca) || '' })
     : [];
+  fotoProdutoTemp = registro && registro.foto_base64 ? registro.foto_base64 : null;
 
   const camposImpostos = CAMPOS_PRODUTO_IMPOSTOS.map(def => renderCampoProduto(def, registro)).join('');
   const camposAdicionais = CAMPOS_PRODUTO_ADICIONAIS.map(def => renderCampoProduto(def, registro)).join('');
@@ -1095,6 +1112,8 @@ function abrirFormProduto(id) {
 
   abrirModal(`
     <h2>${registro ? 'Editar' : 'Cadastrar'} Produto</h2>
+    <div class="produto-modal-layout">
+    <div class="produto-modal-principal">
     <div class="tabs">
       <button type="button" class="tab-btn active" onclick="mostrarAbaProduto(this, 'aba-geral')">Dados Gerais</button>
       <button type="button" class="tab-btn" onclick="mostrarAbaProduto(this, 'aba-estoque')">Estoque</button>
@@ -1210,7 +1229,20 @@ function abrirFormProduto(id) {
         <button type="button" class="btn-secondary" onclick="fecharModal()">Cancelar</button>
       </div>
     </form>
-  `);
+    </div>
+
+    <div class="produto-foto-painel">
+      <label>Foto do Produto</label>
+      <div class="produto-foto-preview-wrap">
+        <img id="produto-foto-preview" class="produto-foto-preview" src="${fotoProdutoTemp || ''}" style="${fotoProdutoTemp ? '' : 'display:none'}">
+        <div id="produto-foto-placeholder" class="produto-foto-placeholder" style="${fotoProdutoTemp ? 'display:none' : ''}">Sem foto</div>
+      </div>
+      <input type="file" id="produto-foto-arquivo" accept="image/*" style="display:none" onchange="previewFotoProduto(event)">
+      <button type="button" class="btn-secondary produto-foto-botao" onclick="document.getElementById('produto-foto-arquivo').click()">Enviar Foto</button>
+      <button type="button" class="btn-secondary produto-foto-botao" id="produto-foto-botao-remover" onclick="removerFotoProduto()" style="${fotoProdutoTemp ? '' : 'display:none'}">Remover Foto</button>
+    </div>
+    </div>
+  `, 'modal-largo');
   recalcularVendaForm();
   renderSimilaresProdutoTemp();
 }
@@ -1249,6 +1281,63 @@ function renderSimilaresProdutoTemp() {
       <button type="button" onclick="removerSimilarProduto(${idx})" title="Remover">&times;</button>
     </span>
   `).join('');
+}
+
+/* Redimensiona a imagem no navegador (lado maior até maxLargura, convertendo para JPEG)
+   antes de guardar em base64, para não deixar o cadastro de produtos pesado demais
+   com fotos em resolução de câmera/celular. */
+function redimensionarImagem(arquivo, maxLargura) {
+  return new Promise((resolve, reject) => {
+    const leitor = new FileReader();
+    leitor.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const escala = Math.min(1, maxLargura / Math.max(img.width, img.height));
+        const largura = Math.round(img.width * escala);
+        const altura = Math.round(img.height * escala);
+        const canvas = document.createElement('canvas');
+        canvas.width = largura;
+        canvas.height = altura;
+        canvas.getContext('2d').drawImage(img, 0, 0, largura, altura);
+        resolve(canvas.toDataURL('image/jpeg', 0.82));
+      };
+      img.onerror = reject;
+      img.src = leitor.result;
+    };
+    leitor.onerror = reject;
+    leitor.readAsDataURL(arquivo);
+  });
+}
+
+async function previewFotoProduto(event) {
+  const arquivo = event.target.files[0];
+  if (!arquivo) return;
+  try {
+    const dataUrl = await redimensionarImagem(arquivo, 900);
+    fotoProdutoTemp = dataUrl;
+    const preview = document.getElementById('produto-foto-preview');
+    const placeholder = document.getElementById('produto-foto-placeholder');
+    const botaoRemover = document.getElementById('produto-foto-botao-remover');
+    preview.src = dataUrl;
+    preview.style.display = 'block';
+    placeholder.style.display = 'none';
+    botaoRemover.style.display = '';
+  } catch (erro) {
+    alert('Não foi possível ler essa imagem. Tente outro arquivo.');
+  }
+}
+
+function removerFotoProduto() {
+  fotoProdutoTemp = null;
+  const preview = document.getElementById('produto-foto-preview');
+  const placeholder = document.getElementById('produto-foto-placeholder');
+  const botaoRemover = document.getElementById('produto-foto-botao-remover');
+  const arquivoInput = document.getElementById('produto-foto-arquivo');
+  preview.src = '';
+  preview.style.display = 'none';
+  placeholder.style.display = 'block';
+  botaoRemover.style.display = 'none';
+  if (arquivoInput) arquivoInput.value = '';
 }
 
 function mostrarAbaProduto(botao, idAba) {
@@ -1317,6 +1406,7 @@ function salvarProduto(event, id) {
   dados.valor_venda = custoReal * (1 + dados.margem_lucro / 100);
 
   dados.similares = similaresProdutoTemp.slice();
+  dados.foto_base64 = fotoProdutoTemp || '';
 
   const lista = loadList('produtos');
   if (id) {
