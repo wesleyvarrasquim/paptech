@@ -106,6 +106,7 @@
   .data-table .acoes button.btn-estornar { font-size: 12px; font-weight: 700; color: var(--perigo); background: rgba(198,40,40,0.08); border: 1px solid rgba(198,40,40,0.35); border-radius: 999px; padding: 5px 10px; margin-right: 6px; white-space: nowrap; }
   .data-table .acoes button.btn-estornar:hover { background: var(--perigo); color: #fff; }
   .vazio { text-align: center; color: var(--texto-suave); padding: 20px; }
+  .texto-suave-pequeno { color: var(--texto-suave); font-size: 12px; }
 
   .modal-overlay { position: fixed; inset: 0; background: rgba(20,30,20,0.45); display: none; align-items: center; justify-content: center; z-index: 1000; padding: 20px; }
   .modal { background: #FFFFFF; border: 1px solid var(--borda); box-shadow: 0 10px 40px rgba(0,0,0,0.18); border-radius: 16px; padding: 26px; width: 100%; max-width: 560px; max-height: 88vh; overflow-y: auto; color: var(--texto); }
@@ -147,8 +148,14 @@
   @keyframes girar { to { transform: rotate(360deg); } }
 
   .permissoes-grade { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px 14px; margin: 6px 0 14px; }
+  .campos-empresa-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 14px; }
+  .campos-empresa-grid .campo { grid-column: span 1; }
+  .campos-empresa-grid .campo-span-2 { grid-column: span 2; }
+  @media (max-width: 720px) { .campos-empresa-grid { grid-template-columns: 1fr; } }
   .permissao-item { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--texto); }
   .permissao-item input { width: auto; }
+  .permissao-item-granular { grid-column: 1 / -1; justify-content: space-between; }
+  .permissao-item-granular select { width: auto; max-width: 220px; font-size: 12.5px; padding: 4px 6px; }
 
   .campo { margin-bottom: 12px; display: flex; flex-direction: column; gap: 4px; }
   .campo label { font-size: 12.5px; color: var(--texto-suave); }
@@ -392,6 +399,10 @@ const SECOES_PERMISSAO = [
   ['backup', 'Backup / Restauração'],
   ['configuracoes', 'Configurações'],
 ];
+/* Estas três áreas têm permissão em 3 níveis (Sem acesso / Visualizar / Cadastrar) em vez de
+   simples sim/não — dá pra liberar alguém só para consultar Produtos/Clientes/Fornecedores
+   sem poder cadastrar, editar ou excluir. */
+const SECOES_GRANULARES = ['produtos', 'clientes', 'fornecedores'];
 const CHAVE_SESSAO_USUARIO = 'westech_sessao_usuario_id';
 
 /* ---------- banco de dados online (Supabase) ---------- */
@@ -545,6 +556,54 @@ function formatarDataBr(data) {
   return `${dia}/${mes}/${ano}`;
 }
 
+function cabecalhoEmpresaImpressaoHtml() {
+  const config = obterConfiguracoes();
+  const empresa = config.dados_empresa || {};
+  const temDados = Object.values(empresa).some(v => (v || '').trim());
+
+  if (!temDados) {
+    return `<div class="cabecalho-empresa"><h1>PAPTECH</h1></div>`;
+  }
+
+  const enderecoLinha = [
+    empresa.endereco,
+    empresa.numero,
+    empresa.bairro,
+  ].filter(Boolean).join(', ');
+  const cidadeUfCep = [
+    [empresa.cidade, empresa.uf].filter(Boolean).join('/'),
+    empresa.cep,
+  ].filter(Boolean).join(' - ');
+
+  return `
+    <div class="cabecalho-empresa">
+      <div class="cabecalho-empresa-topo">
+        ${config.logo_base64 ? `<img src="${config.logo_base64}" class="cabecalho-empresa-logo">` : ''}
+        <div>
+          <h1>${escapeHtml(empresa.nome_fantasia || empresa.razao_social || 'PAPTECH')}</h1>
+          ${empresa.razao_social && empresa.nome_fantasia ? `<div class="cabecalho-empresa-linha">${escapeHtml(empresa.razao_social)}</div>` : ''}
+        </div>
+      </div>
+      <div class="cabecalho-empresa-linha">
+        ${empresa.cnpj ? `CNPJ: ${escapeHtml(empresa.cnpj)}` : ''}${empresa.cnpj && empresa.inscricao_estadual ? ' &nbsp;|&nbsp; ' : ''}${empresa.inscricao_estadual ? `IE: ${escapeHtml(empresa.inscricao_estadual)}` : ''}
+      </div>
+      ${enderecoLinha ? `<div class="cabecalho-empresa-linha">${escapeHtml(enderecoLinha)}</div>` : ''}
+      ${cidadeUfCep ? `<div class="cabecalho-empresa-linha">${escapeHtml(cidadeUfCep)}</div>` : ''}
+      <div class="cabecalho-empresa-linha">
+        ${empresa.telefone ? `Tel: ${escapeHtml(empresa.telefone)}` : ''}${empresa.telefone && empresa.email ? ' &nbsp;|&nbsp; ' : ''}${empresa.email ? escapeHtml(empresa.email) : ''}
+      </div>
+    </div>
+  `;
+}
+
+const ESTILO_CABECALHO_EMPRESA_IMPRESSAO = `
+  .cabecalho-empresa { border-bottom: 2px solid #111; padding-bottom: 10px; margin-bottom: 14px; }
+  .cabecalho-empresa-topo { display: flex; align-items: center; gap: 12px; }
+  .cabecalho-empresa-topo h1 { font-size: 18px; margin: 0; }
+  .cabecalho-empresa-logo { max-height: 56px; max-width: 140px; object-fit: contain; }
+  .cabecalho-empresa-linha { color: #333; font-size: 11.5px; margin-top: 2px; }
+`;
+
 /* ---------- modal ---------- */
 
 function abrirModal(html, classeExtra) {
@@ -568,13 +627,17 @@ document.getElementById('modal-overlay').addEventListener('click', function (e) 
 
 function permissoesTotais() {
   const permissoes = {};
-  SECOES_PERMISSAO.forEach(([chave]) => { permissoes[chave] = true; });
+  SECOES_PERMISSAO.forEach(([chave]) => {
+    permissoes[chave] = SECOES_GRANULARES.includes(chave) ? 'cadastrar' : true;
+  });
   return permissoes;
 }
 
 function permissoesVazias() {
   const permissoes = {};
-  SECOES_PERMISSAO.forEach(([chave]) => { permissoes[chave] = false; });
+  SECOES_PERMISSAO.forEach(([chave]) => {
+    permissoes[chave] = SECOES_GRANULARES.includes(chave) ? 'nenhum' : false;
+  });
   return permissoes;
 }
 
@@ -608,7 +671,23 @@ function temPermissao(secao) {
   const usuario = usuarioLogado();
   if (!usuario) return false;
   if (usuario.nivel === 'Administrador') return true;
-  return !!(usuario.permissoes && usuario.permissoes[secao]);
+  const valor = usuario.permissoes && usuario.permissoes[secao];
+  // "true" é aceito também para compatibilidade com usuários salvos antes desta área ganhar
+  // os 3 níveis (Sem acesso/Visualizar/Cadastrar) — antes era só sim/não.
+  if (SECOES_GRANULARES.includes(secao)) return valor === 'visualizar' || valor === 'cadastrar' || valor === true;
+  return !!valor;
+}
+
+/* Para as áreas com permissão em 3 níveis (Produtos/Clientes/Fornecedores): diz se o usuário
+   logado pode cadastrar/editar/excluir ali, em vez de só visualizar. Para as demais áreas
+   (permissão simples sim/não), equivale ao próprio temPermissao. */
+function podeCadastrar(secao) {
+  const usuario = usuarioLogado();
+  if (!usuario) return false;
+  if (usuario.nivel === 'Administrador') return true;
+  if (!SECOES_GRANULARES.includes(secao)) return temPermissao(secao);
+  const valor = usuario.permissoes && usuario.permissoes[secao];
+  return valor === 'cadastrar' || valor === true;
 }
 
 function mostrarTelaLogin(mensagemErro) {
@@ -782,8 +861,9 @@ function renderPessoaSection(tipo) {
   container.innerHTML = `
     <div class="section-header">
       <h1>${titulo}</h1>
-      <button class="btn-primary" onclick="abrirFormPessoa('${tipo}')">+ Cadastrar ${singular}</button>
+      ${podeCadastrar(tipo) ? `<button class="btn-primary" onclick="abrirFormPessoa('${tipo}')">+ Cadastrar ${singular}</button>` : ''}
     </div>
+    ${!podeCadastrar(tipo) ? '<div class="aviso">Você tem acesso só para visualizar esta área — não é possível cadastrar, editar ou excluir.</div>' : ''}
     <div class="campo busca-produtos">
       <label>Pesquisar por nome, CNPJ ou CPF (use * para separar trechos, ex: silva*0001)</label>
       <input type="text" id="busca-${tipo}" placeholder="Digite para buscar..." value="${escapeHtml(buscaAtual)}" oninput="onBuscaPessoaInput('${tipo}')" autocomplete="off">
@@ -809,6 +889,7 @@ function atualizarTabelaPessoas(tipo) {
   const tbody = document.getElementById(`${tipo}-tbody`);
   if (!tbody) return;
 
+  const podeEditar = podeCadastrar(tipo);
   const linhas = lista.map(p => `
     <tr>
       <td>${escapeHtml(p.razao_social)}</td>
@@ -818,8 +899,10 @@ function atualizarTabelaPessoas(tipo) {
       <td>${escapeHtml(p.uf)}</td>
       <td>${escapeHtml(p.telefone)}</td>
       <td class="acoes">
-        <button onclick="abrirFormPessoa('${tipo}', ${p.id})" title="Editar">&#9998;</button>
-        <button onclick="excluirPessoa('${tipo}', ${p.id})" title="Excluir">&#128465;</button>
+        ${podeEditar ? `
+          <button onclick="abrirFormPessoa('${tipo}', ${p.id})" title="Editar">&#9998;</button>
+          <button onclick="excluirPessoa('${tipo}', ${p.id})" title="Excluir">&#128465;</button>
+        ` : '<span class="texto-suave-pequeno">Somente visualização</span>'}
       </td>
     </tr>
   `).join('');
@@ -831,6 +914,10 @@ function atualizarTabelaPessoas(tipo) {
 }
 
 function abrirFormPessoa(tipo, id) {
+  if (!podeCadastrar(tipo)) {
+    alert('Você não tem permissão para cadastrar/editar nesta área.');
+    return;
+  }
   const lista = loadList(tipo);
   const registro = id ? lista.find(p => p.id === id) : null;
   const singular = SINGULAR_PESSOA[tipo];
@@ -888,6 +975,10 @@ async function buscarCepForm() {
 
 function salvarPessoa(event, tipo, id) {
   event.preventDefault();
+  if (!podeCadastrar(tipo)) {
+    alert('Você não tem permissão para cadastrar/editar nesta área.');
+    return false;
+  }
   const dados = {};
   CAMPOS_PESSOA.forEach(([chave]) => {
     dados[chave] = document.getElementById('campo-' + chave).value.trim();
@@ -912,6 +1003,10 @@ function salvarPessoa(event, tipo, id) {
 }
 
 function excluirPessoa(tipo, id) {
+  if (!podeCadastrar(tipo)) {
+    alert('Você não tem permissão para excluir nesta área.');
+    return;
+  }
   if (!confirm('Deseja realmente excluir este registro?')) return;
   const lista = loadList(tipo).filter(p => p.id !== id);
   saveList(tipo, lista);
@@ -1019,20 +1114,23 @@ function estoqueBadge(p) {
 
 function renderProdutos() {
   const container = document.getElementById('sec-produtos');
+  const podeEditarProdutos = podeCadastrar('produtos');
 
   container.innerHTML = `
     <div class="section-header">
       <h1>Produtos</h1>
-      <div class="header-botoes">
-        <button class="btn-secondary" onclick="abrirMovimentoEstoque()">&#128230; Movimentar Estoque</button>
-        <button class="btn-primary" onclick="abrirFormProduto()">+ Cadastrar Produto</button>
-      </div>
+      ${podeEditarProdutos ? `
+        <div class="header-botoes">
+          <button class="btn-secondary" onclick="abrirMovimentoEstoque()">&#128230; Movimentar Estoque</button>
+          <button class="btn-primary" onclick="abrirFormProduto()">+ Cadastrar Produto</button>
+        </div>
+      ` : ''}
     </div>
     <div class="campo busca-produtos">
       <label>Pesquisar por código ou descrição (use * para separar trechos, ex: parafuso*m6)</label>
       <input type="text" id="produtos-busca" placeholder="Digite para buscar..." value="${escapeHtml(produtosFiltroAtual)}" oninput="onBuscaProdutosInput()" autocomplete="off">
     </div>
-    <div class="aviso" style="margin-bottom:12px">Clique no produto para ver todos os dados completos (estoque, impostos, fornecedor etc).</div>
+    <div class="aviso" style="margin-bottom:12px">${podeEditarProdutos ? 'Clique no produto para ver todos os dados completos (estoque, impostos, fornecedor etc).' : 'Você tem acesso só para visualizar Produtos — clique no produto para ver os dados completos, sem poder alterar.'}</div>
     <table class="data-table">
       <thead>
         <tr><th>Cód. Interno</th><th>Cód. Original</th><th>Similares</th><th>Descrição</th><th>Marca</th><th>Localização</th><th>Estoque</th><th>Valor de Venda</th><th></th></tr>
@@ -1054,6 +1152,7 @@ function atualizarTabelaProdutos() {
   const tbody = document.getElementById('produtos-tbody');
   if (!tbody) return;
 
+  const podeEditarProdutos = podeCadastrar('produtos');
   const linhas = lista.map(p => `
     <tr class="linha-clicavel" onclick="abrirFormProduto(${p.id})">
       <td>${escapeHtml(p.cod_interno)}</td>
@@ -1065,10 +1164,12 @@ function atualizarTabelaProdutos() {
       <td>${estoqueBadge(p)}</td>
       <td>${formatarMoeda(p.valor_venda)}</td>
       <td class="acoes" onclick="event.stopPropagation()">
-        <button onclick="abrirFormProduto(${p.id})" title="Ver / Editar todos os dados">&#9998;</button>
-        <button onclick="clonarProduto(${p.id})" title="Clonar item">&#128203;</button>
-        <button onclick="abrirMovimentoEstoque(${p.id})" title="Movimentar estoque">&#128230;</button>
-        <button onclick="excluirProduto(${p.id})" title="Excluir">&#128465;</button>
+        <button onclick="abrirFormProduto(${p.id})" title="${podeEditarProdutos ? 'Ver / Editar todos os dados' : 'Ver dados completos'}">${podeEditarProdutos ? '&#9998;' : '&#128065;'}</button>
+        ${podeEditarProdutos ? `
+          <button onclick="clonarProduto(${p.id})" title="Clonar item">&#128203;</button>
+          <button onclick="abrirMovimentoEstoque(${p.id})" title="Movimentar estoque">&#128230;</button>
+          <button onclick="excluirProduto(${p.id})" title="Excluir">&#128465;</button>
+        ` : ''}
       </td>
     </tr>
   `).join('');
@@ -1080,6 +1181,10 @@ function atualizarTabelaProdutos() {
 }
 
 function clonarProduto(id) {
+  if (!podeCadastrar('produtos')) {
+    alert('Você não tem permissão para cadastrar produtos.');
+    return;
+  }
   const lista = loadList('produtos');
   const original = lista.find(p => p.id === id);
   if (!original) return;
@@ -1178,8 +1283,11 @@ function abrirFormProduto(id) {
     <option value="${f.id}" ${fornecedorSelecionadoId === f.id ? 'selected' : ''}>${escapeHtml(f.razao_social)}</option>
   `).join('');
 
+  const somenteVisualizarProduto = !podeCadastrar('produtos');
+
   abrirModal(`
-    <h2>${registro ? 'Editar' : 'Cadastrar'} Produto</h2>
+    <h2>${somenteVisualizarProduto ? 'Visualizar' : (registro ? 'Editar' : 'Cadastrar')} Produto</h2>
+    ${somenteVisualizarProduto ? '<div class="aviso">Você tem acesso só para visualizar — não é possível alterar este produto.</div>' : ''}
     <div class="produto-modal-layout">
     <div class="produto-modal-principal">
     <div class="tabs">
@@ -1313,6 +1421,13 @@ function abrirFormProduto(id) {
   `, 'modal-largo');
   recalcularVendaForm();
   renderSimilaresProdutoTemp();
+
+  if (somenteVisualizarProduto) {
+    document.querySelectorAll('#modal-box input, #modal-box select, #modal-box textarea').forEach(el => { el.disabled = true; });
+    const botaoSalvar = document.querySelector('#form-produto button[type="submit"]');
+    if (botaoSalvar) botaoSalvar.style.display = 'none';
+    document.querySelectorAll('#similares-lista-produto button, #modal-box button[onclick^="adicionarSimilarProduto"], .produto-foto-botao').forEach(btn => { btn.style.display = 'none'; });
+  }
 }
 
 function adicionarSimilarProduto() {
@@ -1436,6 +1551,10 @@ function recalcularVendaForm() {
 
 function salvarProduto(event, id) {
   event.preventDefault();
+  if (!podeCadastrar('produtos')) {
+    alert('Você não tem permissão para cadastrar/editar produtos.');
+    return false;
+  }
   const dados = {};
 
   [...CAMPOS_PRODUTO_GERAL, ...CAMPOS_PRODUTO_IMPOSTOS, ...CAMPOS_PRODUTO_ADICIONAIS].forEach(([chave]) => {
@@ -1492,6 +1611,10 @@ function salvarProduto(event, id) {
 }
 
 function excluirProduto(id) {
+  if (!podeCadastrar('produtos')) {
+    alert('Você não tem permissão para excluir produtos.');
+    return;
+  }
   if (!confirm('Deseja realmente excluir este produto?')) return;
   const lista = loadList('produtos').filter(p => p.id !== id);
   saveList('produtos', lista);
@@ -1501,6 +1624,10 @@ function excluirProduto(id) {
 /* ---------- movimento manual de estoque ---------- */
 
 function abrirMovimentoEstoque(produtoIdPreSelecionado) {
+  if (!podeCadastrar('produtos')) {
+    alert('Você não tem permissão para movimentar o estoque.');
+    return;
+  }
   produtoSelecionadoMovimento = produtoIdPreSelecionado
     ? loadList('produtos').find(p => p.id === produtoIdPreSelecionado) || null
     : null;
@@ -1794,11 +1921,13 @@ function imprimirCompra(id) {
         .totais { margin-top: 14px; text-align: right; font-size: 14px; font-weight: bold; }
         .secao { margin-top: 14px; font-size: 12.5px; line-height: 1.6; }
         .secao strong { display: inline-block; min-width: 150px; }
+        ${ESTILO_CABECALHO_EMPRESA_IMPRESSAO}
         @media print { body { padding: 10px; } }
       </style>
     </head>
     <body>
-      <h1>PAPTECH - Pedido de Compra #${compra.id}</h1>
+      ${cabecalhoEmpresaImpressaoHtml()}
+      <h1 style="font-size:15px">Pedido de Compra #${compra.id}</h1>
       <div class="sub">Data: ${formatarDataBr(compra.data_compra)} &nbsp;|&nbsp; Comprador: ${escapeHtml(compra.comprador || '-')} &nbsp;|&nbsp; Nº Pedido/NF: ${escapeHtml(compra.numero_nf || '-')} &nbsp;|&nbsp; Tipo: ${escapeHtml(compra.tipo_pedido || 'Nota Fiscal')}</div>
 
       <div class="secao">
@@ -2690,11 +2819,13 @@ function imprimirVenda(id) {
         .totais { margin-top: 14px; text-align: right; font-size: 14px; font-weight: bold; }
         .secao { margin-top: 14px; font-size: 12.5px; line-height: 1.6; }
         .secao strong { display: inline-block; min-width: 130px; }
+        ${ESTILO_CABECALHO_EMPRESA_IMPRESSAO}
         @media print { body { padding: 10px; } }
       </style>
     </head>
     <body>
-      <h1>PAPTECH - Pedido de Venda #${venda.id}</h1>
+      ${cabecalhoEmpresaImpressaoHtml()}
+      <h1 style="font-size:15px">Pedido de Venda #${venda.id}</h1>
       <div class="sub">Data: ${formatarDataBr(venda.data_venda)} &nbsp;|&nbsp; Vendedor: ${escapeHtml(venda.vendedor || '-')} &nbsp;|&nbsp; Nº Pedido: ${escapeHtml(venda.numero || '-')}</div>
 
       <div class="secao">
@@ -4069,6 +4200,35 @@ function salvarConfiguracoes(parcial) {
   saveList('configuracoes', [{ ...atual, ...parcial, id: 1 }]);
 }
 
+const CAMPOS_EMPRESA = [
+  ['razao_social', 'Razão Social'],
+  ['nome_fantasia', 'Nome Fantasia'],
+  ['cnpj', 'CNPJ'],
+  ['inscricao_estadual', 'Inscrição Estadual'],
+  ['cep', 'CEP'],
+  ['endereco', 'Endereço'],
+  ['numero', 'Número'],
+  ['bairro', 'Bairro'],
+  ['cidade', 'Cidade'],
+  ['uf', 'UF'],
+  ['telefone', 'Telefone'],
+  ['email', 'E-mail'],
+];
+
+function dadosEmpresaAtuais() {
+  return obterConfiguracoes().dados_empresa || {};
+}
+
+function salvarDadosEmpresaConfiguracao() {
+  const dadosEmpresa = {};
+  CAMPOS_EMPRESA.forEach(([chave]) => {
+    const input = document.getElementById('empresa-' + chave);
+    dadosEmpresa[chave] = input ? input.value.trim() : '';
+  });
+  salvarConfiguracoes({ dados_empresa: dadosEmpresa });
+  alert('Dados da empresa salvos com sucesso!');
+}
+
 function aplicarMarcaDaguaNaTela() {
   const el = document.getElementById('marca-dagua-fundo');
   if (!el) return;
@@ -4110,6 +4270,14 @@ function renderConfiguracoes() {
     </tr>
   `).join('');
 
+  const dadosEmpresa = dadosEmpresaAtuais();
+  const camposEmpresaHtml = CAMPOS_EMPRESA.map(([chave, rotulo]) => `
+    <div class="campo${chave === 'endereco' ? ' campo-span-2' : ''}">
+      <label>${rotulo}</label>
+      <input type="text" id="empresa-${chave}" value="${escapeHtml(dadosEmpresa[chave] || '')}">
+    </div>
+  `).join('');
+
   const blocoUsuarios = ehAdministrador ? `
     <h2 style="margin-top:28px">Usuários e Permissões de Acesso</h2>
     <div class="aviso">Cada usuário entra com login e senha próprios. Usuários do nível "Administrador" têm acesso total ao sistema (inclusive a esta tela); usuários "Operador" só veem as áreas marcadas no cadastro dele.</div>
@@ -4139,6 +4307,15 @@ function renderConfiguracoes() {
       <thead><tr><th>Nome</th><th>Telefone</th><th>Comissão</th><th>Status</th><th></th></tr></thead>
       <tbody>${linhasVendedores || '<tr><td colspan="5" class="vazio">Nenhum vendedor cadastrado.</td></tr>'}</tbody>
     </table>
+
+    <h2 style="margin-top:28px">Dados da Empresa</h2>
+    <div class="aviso">Esses dados aparecem no cabeçalho ao imprimir Pedidos de Compra e Pedidos de Venda.</div>
+    <div class="campos-empresa-grid">
+      ${camposEmpresaHtml}
+    </div>
+    <div class="modal-botoes" style="margin-top:4px">
+      <button type="button" class="btn-primary" onclick="salvarDadosEmpresaConfiguracao()">Salvar Dados da Empresa</button>
+    </div>
 
     <h2 style="margin-top:28px">Logo da Empresa (Marca d'Água)</h2>
     <div class="aviso">A imagem enviada fica salva neste navegador e aparece de forma discreta (translúcida) no fundo de todas as telas do sistema, como uma marca d'água.</div>
@@ -4311,12 +4488,28 @@ function abrirFormUsuario(id) {
   const permissoesAtuais = registro ? (registro.permissoes || permissoesVazias()) : permissoesVazias();
   const ehAdminRegistro = registro ? registro.nivel === 'Administrador' : false;
 
-  const camposPermissao = SECOES_PERMISSAO.map(([chave, label]) => `
-    <label class="permissao-item">
-      <input type="checkbox" class="checkbox-permissao-usuario" value="${chave}" ${permissoesAtuais[chave] ? 'checked' : ''} ${ehAdminRegistro ? 'disabled' : ''}>
-      ${escapeHtml(label)}
-    </label>
-  `).join('');
+  const camposPermissao = SECOES_PERMISSAO.map(([chave, label]) => {
+    if (SECOES_GRANULARES.includes(chave)) {
+      // true (de usuários salvos antes dos 3 níveis existirem) equivale a "cadastrar".
+      const valorAtual = permissoesAtuais[chave] === true ? 'cadastrar' : (permissoesAtuais[chave] || 'nenhum');
+      return `
+        <label class="permissao-item permissao-item-granular">
+          ${escapeHtml(label)}
+          <select class="select-permissao-usuario" data-secao="${chave}" ${ehAdminRegistro ? 'disabled' : ''}>
+            <option value="nenhum" ${valorAtual === 'nenhum' ? 'selected' : ''}>Sem acesso</option>
+            <option value="visualizar" ${valorAtual === 'visualizar' ? 'selected' : ''}>Visualizar (sem alterar)</option>
+            <option value="cadastrar" ${valorAtual === 'cadastrar' ? 'selected' : ''}>Cadastrar (cadastrar/editar/excluir)</option>
+          </select>
+        </label>
+      `;
+    }
+    return `
+      <label class="permissao-item">
+        <input type="checkbox" class="checkbox-permissao-usuario" value="${chave}" ${permissoesAtuais[chave] ? 'checked' : ''} ${ehAdminRegistro ? 'disabled' : ''}>
+        ${escapeHtml(label)}
+      </label>
+    `;
+  }).join('');
 
   abrirModal(`
     <h2>${registro ? 'Editar' : 'Cadastrar'} Usuário</h2>
@@ -4394,6 +4587,9 @@ function salvarUsuario(event, id) {
   if (nivel !== 'Administrador') {
     document.querySelectorAll('.checkbox-permissao-usuario').forEach(chk => {
       permissoes[chk.value] = chk.checked;
+    });
+    document.querySelectorAll('.select-permissao-usuario').forEach(sel => {
+      permissoes[sel.dataset.secao] = sel.value;
     });
   }
 
