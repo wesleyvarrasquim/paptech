@@ -50,25 +50,28 @@
   .logo-preview { max-width: 220px; max-height: 120px; display: block; margin: 10px 0; border-radius: 8px; background: rgba(0,0,0,0.04); padding: 8px; }
   .totais-relatorio { margin-top: 14px; text-align: right; font-size: 15px; color: var(--accent-2); }
 
-  .sidebar { width: 250px; display: flex; flex-direction: column; gap: 8px; padding: 26px 16px; flex-shrink: 0; position: sticky; top: 0; height: 100vh; background: #F7FBF7; border-right: 1px solid var(--borda); }
-  .sidebar .logo { color: var(--accent-2); font-size: 21px; font-weight: 800; text-align: center; padding: 6px 0 26px; letter-spacing: 3px; }
+  .sidebar { width: 290px; display: flex; flex-direction: column; gap: 8px; padding: 22px 14px; flex-shrink: 0; position: sticky; top: 0; height: 100vh; background: #F7FBF7; border-right: 1px solid var(--borda); overflow-y: auto; }
+  .sidebar .logo { color: var(--accent-2); font-size: 20px; font-weight: 800; text-align: center; padding: 4px 0 16px; letter-spacing: 3px; }
   .sidebar .logo span { color: var(--accent); }
+  .nav-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
   .nav-btn {
     background: #FFFFFF;
     border: 1px solid var(--borda);
     color: var(--texto-suave);
     text-align: left;
-    padding: 13px 18px;
-    font-size: 14px;
-    border-radius: 14px;
+    padding: 9px 10px;
+    font-size: 12px;
+    line-height: 1.2;
+    border-radius: 12px;
     cursor: pointer;
     display: flex;
-    align-items: center;
-    gap: 10px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 5px;
     transition: transform .15s ease, background .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease;
   }
   .nav-btn .icone { font-size: 16px; line-height: 1; }
-  .nav-btn:hover { background: rgba(46,125,50,0.08); border-color: var(--accent); color: var(--accent-2); transform: translateX(3px); }
+  .nav-btn:hover { background: rgba(46,125,50,0.08); border-color: var(--accent); color: var(--accent-2); transform: translateY(-2px); }
   .nav-btn.active {
     background: var(--accent);
     border-color: var(--accent);
@@ -197,9 +200,10 @@
   .btn-excluir:hover { background: rgba(198,40,40,0.1); color: var(--perigo); }
 
   .dashboard-logo-painel { display: flex; align-items: center; justify-content: center; background: var(--painel); border: 1px solid var(--borda); border-radius: 16px; padding: 22px; margin-bottom: 22px; min-height: 110px; }
-  .dashboard-logo-img { max-height: 110px; max-width: 100%; object-fit: contain; }
-  .dashboard-logo-vazio { display: flex; flex-direction: column; align-items: center; gap: 6px; color: var(--texto-suave); font-size: 13px; text-align: center; }
-  .dashboard-logo-icone { font-size: 30px; }
+  .dashboard-logo-painel-cheio { min-height: calc(100vh - 60px); }
+  .dashboard-logo-img { max-height: min(60vh, 420px); max-width: 90%; object-fit: contain; }
+  .dashboard-logo-vazio { display: flex; flex-direction: column; align-items: center; gap: 10px; color: var(--texto-suave); font-size: 15px; text-align: center; }
+  .dashboard-logo-icone { font-size: 46px; }
   .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; margin-bottom: 28px; }
   .kpi-card { position: relative; overflow: hidden; background: var(--painel); border: 1px solid var(--borda); border-radius: 16px; padding: 18px 20px; }
   .kpi-card::before { content: ''; position: absolute; inset: 0; background: radial-gradient(circle at top right, rgba(46,125,50,0.06), transparent 60%); pointer-events: none; }
@@ -250,9 +254,10 @@
 
   @media (max-width: 700px) {
     .app { flex-direction: column; }
-    .sidebar { width: 100%; flex-direction: row; overflow-x: auto; height: auto; position: static; padding: 14px; }
+    .sidebar { width: 100%; flex-direction: row; overflow-x: auto; overflow-y: visible; height: auto; position: static; padding: 14px; }
     .sidebar .logo { padding: 6px 14px; white-space: nowrap; }
-    .nav-btn { padding: 12px 14px; white-space: nowrap; }
+    .nav-grid { display: contents; }
+    .nav-btn { flex-direction: row; padding: 12px 14px; white-space: nowrap; }
     .content { padding: 18px; }
     .produto-modal-layout { flex-direction: column; }
     .produto-foto-painel { width: 100%; position: static; }
@@ -289,20 +294,22 @@
 <div class="app" id="app-principal" style="display:none">
   <nav class="sidebar">
     <div class="logo">PAP<span>TECH</span></div>
-    <button class="nav-btn active" data-section="dashboard"><span class="icone">📊</span>Dashboard</button>
-    <button class="nav-btn" data-section="clientes"><span class="icone">🧑‍🔧</span>Clientes</button>
-    <button class="nav-btn" data-section="fornecedores"><span class="icone">🏭</span>Fornecedores</button>
-    <button class="nav-btn" data-section="transportadoras"><span class="icone">🚚</span>Transportadoras</button>
-    <button class="nav-btn" data-section="produtos"><span class="icone">⚙️</span>Produtos</button>
-    <button class="nav-btn" data-section="compras"><span class="icone">📦</span>Compras</button>
-    <button class="nav-btn" data-section="vendas"><span class="icone">🧾</span>Vendas</button>
-    <button class="nav-btn" data-section="contas-receber"><span class="icone">📥</span>Contas a Receber</button>
-    <button class="nav-btn" data-section="contas-pagar"><span class="icone">📤</span>Contas a Pagar</button>
-    <button class="nav-btn" data-section="cobranca"><span class="icone">☎️</span>Cobrança</button>
-    <button class="nav-btn" data-section="calendario"><span class="icone">📅</span>Calendário Financeiro</button>
-    <button class="nav-btn" data-section="calculadora"><span class="icone">🧮</span>Calculadora</button>
-    <button class="nav-btn" data-section="backup"><span class="icone">💾</span>Backup / Restauração</button>
-    <button class="nav-btn" data-section="configuracoes"><span class="icone">⚙️</span>Configurações</button>
+    <div class="nav-grid">
+      <button class="nav-btn active" data-section="dashboard"><span class="icone">📊</span>Dashboard</button>
+      <button class="nav-btn" data-section="clientes"><span class="icone">🧑‍🔧</span>Clientes</button>
+      <button class="nav-btn" data-section="fornecedores"><span class="icone">🏭</span>Fornecedores</button>
+      <button class="nav-btn" data-section="transportadoras"><span class="icone">🚚</span>Transportadoras</button>
+      <button class="nav-btn" data-section="produtos"><span class="icone">⚙️</span>Produtos</button>
+      <button class="nav-btn" data-section="compras"><span class="icone">📦</span>Compras</button>
+      <button class="nav-btn" data-section="vendas"><span class="icone">🧾</span>Vendas</button>
+      <button class="nav-btn" data-section="contas-receber"><span class="icone">📥</span>Contas a Receber</button>
+      <button class="nav-btn" data-section="contas-pagar"><span class="icone">📤</span>Contas a Pagar</button>
+      <button class="nav-btn" data-section="cobranca"><span class="icone">☎️</span>Cobrança</button>
+      <button class="nav-btn" data-section="calendario"><span class="icone">📅</span>Calendário Financeiro</button>
+      <button class="nav-btn" data-section="calculadora"><span class="icone">🧮</span>Calculadora</button>
+      <button class="nav-btn" data-section="backup"><span class="icone">💾</span>Backup / Restauração</button>
+      <button class="nav-btn" data-section="configuracoes"><span class="icone">⚙️</span>Configurações</button>
+    </div>
     <div id="sidebar-usuario-info" class="sidebar-usuario-info"></div>
     <div id="indicador-sync" class="indicador-sync"></div>
   </nav>
@@ -4521,65 +4528,6 @@ function confirmarImportacaoXmlNfe() {
 /* ---------- dashboard ---------- */
 
 function renderDashboard() {
-  const clientes = loadList('clientes');
-  const fornecedores = loadList('fornecedores');
-  const produtos = loadList('produtos');
-  const vendas = loadList('vendas');
-  const compras = loadList('compras');
-  const contasReceber = loadList('contas_receber');
-  const contasPagar = loadList('contas_pagar');
-
-  const agora = new Date();
-  const hojeStr = agora.toISOString().slice(0, 10);
-  const mesAtual = agora.toISOString().slice(0, 7);
-
-  const vendasMes = vendas.filter(v => (v.data_venda || '').startsWith(mesAtual));
-  const comprasMes = compras.filter(c => (c.data_compra || '').startsWith(mesAtual));
-  const totalVendasMes = vendasMes.reduce((soma, v) => soma + (Number(v.valor_total) || 0), 0);
-  const totalComprasMes = comprasMes.reduce((soma, c) => soma + (Number(c.valor_total) || 0), 0);
-
-  const receberPendente = contasReceber.filter(c => !c.data_recebimento).reduce((s, c) => s + (Number(c.valor) || 0), 0);
-  const pagarPendente = contasPagar.filter(c => !c.data_pagamento).reduce((s, c) => s + (Number(c.valor) || 0), 0);
-  const receberVencidas = contasReceber.filter(c => !c.data_recebimento && c.data_vencimento && c.data_vencimento < hojeStr).length;
-  const pagarVencidas = contasPagar.filter(c => !c.data_pagamento && c.data_vencimento && c.data_vencimento < hojeStr).length;
-  const totalVencidas = receberVencidas + pagarVencidas;
-
-  const valorEmEstoque = produtos.reduce((soma, p) => soma + ((Number(p.estoque_atual) || 0) * (Number(p.valor_custo) || 0)), 0);
-  const produtosEstoqueBaixo = produtos.filter(p => Number(p.estoque_minimo) > 0 && (Number(p.estoque_atual) || 0) <= Number(p.estoque_minimo)).length;
-
-  const linhasVendas = vendas.slice().reverse().slice(0, 5).map(v => {
-    const cliente = clientes.find(c => c.id === v.cliente_id);
-    return `<tr><td>${escapeHtml(cliente ? cliente.razao_social : '-')}</td><td>${formatarDataBr(v.data_venda)}</td><td>${formatarMoeda(v.valor_total)}</td></tr>`;
-  }).join('');
-
-  const linhasCompras = compras.slice().reverse().slice(0, 5).map(c => {
-    const forn = fornecedores.find(f => f.id === c.fornecedor_id);
-    return `<tr><td>${escapeHtml(forn ? forn.razao_social : '-')}</td><td>${formatarDataBr(c.data_compra)}</td><td>${formatarMoeda(c.valor_total)}</td></tr>`;
-  }).join('');
-
-  const contasReceberEmAtraso = contasReceber.filter(c => !c.data_recebimento && c.data_vencimento && c.data_vencimento < hojeStr).length;
-
-  const modulos = [
-    ['clientes', '🧑‍🔧', 'Clientes'],
-    ['fornecedores', '🏭', 'Fornecedores'],
-    ['transportadoras', '🚚', 'Transportadoras'],
-    ['produtos', '⚙️', 'Produtos'],
-    ['compras', '📦', 'Compras'],
-    ['vendas', '🧾', 'Vendas'],
-    ['contas-receber', '📥', 'C. a Receber'],
-    ['contas-pagar', '📤', 'C. a Pagar'],
-    ['cobranca', '☎️', 'Cobrança'],
-    ['calendario', '📅', 'Calendário'],
-    ['calculadora', '🧮', 'Calculadora'],
-    ['backup', '💾', 'Backup'],
-  ].filter(([secao]) => temPermissao(secao));
-  const launcherHtml = modulos.map(([secao, icone, label]) => `
-    <div class="launcher-tile" onclick="irParaSecao('${secao}')">
-      <span class="launcher-icone">${icone}</span>
-      <span class="launcher-label">${label}</span>
-    </div>
-  `).join('');
-
   const config = obterConfiguracoes();
   const logoDashboardHtml = config.logo_base64
     ? `<img src="${config.logo_base64}" alt="Logo da empresa" class="dashboard-logo-img">`
@@ -4590,71 +4538,7 @@ function renderDashboard() {
 
   const container = document.getElementById('sec-dashboard');
   container.innerHTML = `
-    <div class="section-header">
-      <h1>Dashboard</h1>
-    </div>
-    <div class="dashboard-logo-painel">${logoDashboardHtml}</div>
-    <p class="launcher-titulo">Acesso rápido</p>
-    <div class="launcher-grid">${launcherHtml}</div>
-    <div class="kpi-grid">
-      <div class="kpi-card">
-        <span class="kpi-icone">📦</span>
-        <div class="kpi-valor">${formatarMoeda(valorEmEstoque)}</div>
-        <div class="kpi-label">Valor em Estoque</div>
-      </div>
-      <div class="kpi-card ${produtosEstoqueBaixo > 0 ? 'kpi-perigo' : ''}">
-        <span class="kpi-icone">📉</span>
-        <div class="kpi-valor">${produtosEstoqueBaixo}</div>
-        <div class="kpi-label">Produtos com Estoque Baixo</div>
-      </div>
-      <div class="kpi-card kpi-destaque kpi-verde">
-        <span class="kpi-icone">🧾</span>
-        <div class="kpi-valor">${formatarMoeda(totalVendasMes)}</div>
-        <div class="kpi-label">Vendas no Mês (${vendasMes.length})</div>
-      </div>
-      <div class="kpi-card">
-        <span class="kpi-icone">🚚</span>
-        <div class="kpi-valor">${formatarMoeda(totalComprasMes)}</div>
-        <div class="kpi-label">Compras no Mês (${comprasMes.length})</div>
-      </div>
-      <div class="kpi-card kpi-verde">
-        <span class="kpi-icone">📥</span>
-        <div class="kpi-valor">${formatarMoeda(receberPendente)}</div>
-        <div class="kpi-label">A Receber (pendente)</div>
-      </div>
-      <div class="kpi-card kpi-alerta">
-        <span class="kpi-icone">📤</span>
-        <div class="kpi-valor">${formatarMoeda(pagarPendente)}</div>
-        <div class="kpi-label">A Pagar (pendente)</div>
-      </div>
-      <div class="kpi-card ${totalVencidas > 0 ? 'kpi-perigo' : ''}">
-        <span class="kpi-icone">⚠️</span>
-        <div class="kpi-valor">${totalVencidas}</div>
-        <div class="kpi-label">Contas Vencidas</div>
-      </div>
-      <div class="kpi-card ${contasReceberEmAtraso > 0 ? 'kpi-perigo' : ''}" onclick="irParaSecao('cobranca')" style="cursor:pointer">
-        <span class="kpi-icone">☎️</span>
-        <div class="kpi-valor">${contasReceberEmAtraso}</div>
-        <div class="kpi-label">Clientes p/ Cobrar</div>
-      </div>
-    </div>
-
-    <div class="dashboard-colunas">
-      <div class="dashboard-painel">
-        <h2>Últimas Vendas</h2>
-        <table class="data-table">
-          <thead><tr><th>Cliente</th><th>Data</th><th>Valor</th></tr></thead>
-          <tbody>${linhasVendas || '<tr><td colspan="3" class="vazio">Nenhuma venda ainda.</td></tr>'}</tbody>
-        </table>
-      </div>
-      <div class="dashboard-painel">
-        <h2>Últimas Compras</h2>
-        <table class="data-table">
-          <thead><tr><th>Fornecedor</th><th>Data</th><th>Valor</th></tr></thead>
-          <tbody>${linhasCompras || '<tr><td colspan="3" class="vazio">Nenhuma compra ainda.</td></tr>'}</tbody>
-        </table>
-      </div>
-    </div>
+    <div class="dashboard-logo-painel dashboard-logo-painel-cheio">${logoDashboardHtml}</div>
   `;
 }
 
