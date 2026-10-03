@@ -172,6 +172,13 @@
   .item-linha input { flex: 1; min-width: 80px; }
 
   .aviso { background: #FFF6DE; border: 1px solid #EBCB78; color: #7A5B00; padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; }
+  .certificado-a1-caixa { background: var(--painel); border: 1px solid var(--borda); border-radius: 10px; padding: 14px 18px; font-size: 13.5px; }
+  .certificado-a1-caixa p { margin: 0 0 8px; }
+  .certificado-a1-lista { margin: 0 0 10px; padding-left: 20px; }
+  .certificado-a1-lista li { margin-bottom: 4px; }
+  .certificado-a1-lista a { color: var(--accent-2); font-weight: 600; text-decoration: none; }
+  .certificado-a1-lista a:hover { text-decoration: underline; }
+  .certificado-a1-dica { color: var(--texto-suave); font-size: 12.5px; margin: 0; }
 
   .resumo-total { margin-bottom: 16px; font-size: 14px; color: var(--texto); background: var(--painel); border: 1px solid var(--borda); padding: 10px 16px; border-radius: 10px; display: inline-block; }  .resumo-total strong { color: var(--accent-2); }
   .filtro-periodo-caixa { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; background: var(--painel); border: 1px solid var(--borda); border-radius: 10px; padding: 12px 16px; margin-bottom: 14px; }
@@ -3934,6 +3941,25 @@ function renderConfiguracoes() {
     <div class="modal-botoes" style="margin-top:4px">
       <button type="button" class="btn-primary" onclick="salvarLogoConfiguracao()">Salvar Logo</button>
       <button type="button" class="btn-secondary" onclick="removerLogoConfiguracao()">Remover Logo</button>
+    </div>
+
+    <h2 style="margin-top:28px">Certificado Digital A1 (para emissão de NF-e)</h2>
+    <div class="aviso">
+      Para emitir Nota Fiscal eletrônica de verdade (autorizada pela SEFAZ), a empresa precisa
+      de um <strong>certificado digital A1</strong> no CNPJ dela. É um arquivo (.pfx) comprado
+      numa certificadora credenciada, que seu contador ou o provedor de NF-e usa para assinar as
+      notas. <strong>Por segurança, o PAPTECH não armazena esse arquivo</strong> — ele é
+      instalado direto no provedor de emissão de NF-e que você contratar (ex: Focus NFe,
+      PlugNotas, eNotas), nunca aqui no sistema.
+    </div>
+    <div class="certificado-a1-caixa">
+      <p>Onde comprar e baixar o certificado A1 (custo aproximado R$ 150–300/ano):</p>
+      <ul class="certificado-a1-lista">
+        <li><a href="https://serasa.certificadodigital.com.br" target="_blank" rel="noopener">Serasa Certificado Digital</a></li>
+        <li><a href="https://www.certisign.com.br" target="_blank" rel="noopener">Certisign</a></li>
+        <li><a href="https://www.soluti.com.br" target="_blank" rel="noopener">Soluti</a></li>
+      </ul>
+      <p class="certificado-a1-dica">Depois de comprar e baixar o arquivo .pfx, cadastre-o no painel do provedor de NF-e escolhido — é ele que vai assinar e enviar as notas para a SEFAZ.</p>
     </div>
   `;
 }
