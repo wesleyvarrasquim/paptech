@@ -142,6 +142,9 @@
   .indicador-sync.sync-erro { background: rgba(184,134,11,0.12); color: #8A6400; }
   .indicador-sync.sync-off { background: rgba(0,0,0,0.04); color: var(--texto-suave); }
 
+  .btn-atualizar-sistema { margin-top: 8px; width: 100%; background: #FFFFFF; border: 1px solid var(--borda); color: var(--texto); border-radius: 8px; padding: 7px 10px; font-size: 12.5px; cursor: pointer; font-family: inherit; }
+  .btn-atualizar-sistema:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+
   .tela-carregando { position: fixed; inset: 0; z-index: 3000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: linear-gradient(135deg, #F2F7F2, #FFFFFF); }
   .tela-carregando .spinner { width: 34px; height: 34px; border: 4px solid var(--borda); border-top-color: var(--accent); border-radius: 50%; animation: girar 0.8s linear infinite; }
   .tela-carregando .texto { color: var(--texto-suave); font-size: 13.5px; }
@@ -331,6 +334,7 @@
     </div>
     <div id="sidebar-usuario-info" class="sidebar-usuario-info"></div>
     <div id="indicador-sync" class="indicador-sync"></div>
+    <button type="button" class="btn-atualizar-sistema" onclick="atualizarSistema()" title="Busca novamente os dados e a versão mais recente do sistema">🔄 Atualizar Sistema</button>
   </nav>
   <main class="content">
     <section id="sec-dashboard" class="section"></section>
@@ -431,6 +435,19 @@ function atualizarIndicadorSync(status, mensagem) {
     off: '☁ Somente local (nuvem não configurada)',
   };
   el.textContent = mensagem || textos[status] || '';
+}
+
+/* Botão "Atualizar Sistema": recarrega a página, o que já faz o navegador
+   buscar a versão mais recente do arquivo (quando hospedado numa URL) e
+   também aciona de novo o sincronizarComNuvem() que roda ao carregar —
+   ou seja, atualiza o código E os dados numa única ação. */
+function atualizarSistema() {
+  const telaCarregando = document.getElementById('tela-carregando');
+  if (telaCarregando) {
+    telaCarregando.querySelector('.texto').textContent = 'Atualizando sistema...';
+    telaCarregando.style.display = 'flex';
+  }
+  window.location.reload();
 }
 
 /* Busca TODAS as coleções na nuvem de uma vez e sobrescreve o localStorage
