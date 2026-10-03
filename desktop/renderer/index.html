@@ -1120,7 +1120,7 @@ function renderProdutos() {
     <div class="aviso" style="margin-bottom:12px">${podeEditarProdutos ? 'Clique no produto para ver todos os dados completos (estoque, impostos, fornecedor etc).' : 'Você tem acesso só para visualizar Produtos — clique no produto para ver os dados completos, sem poder alterar.'}</div>
     <table class="data-table">
       <thead>
-        <tr><th>Cód. Interno</th><th>Cód. Original</th><th>Similares</th><th>Descrição</th><th>Marca</th><th>Localização</th><th>Estoque</th><th>Valor de Venda</th><th></th></tr>
+        <tr><th>Cód. Interno</th><th>Cód. Original</th><th>Similares</th><th>Descrição</th><th>Marca</th><th>Localização</th><th>Estoque</th><th>Custo</th><th>Valor de Venda</th><th></th></tr>
       </thead>
       <tbody id="produtos-tbody"></tbody>
     </table>
@@ -1149,6 +1149,7 @@ function atualizarTabelaProdutos() {
       <td>${escapeHtml(p.marca || '-')}</td>
       <td>${escapeHtml(p.localizacao || '-')}</td>
       <td>${estoqueBadge(p)}</td>
+      <td>${formatarMoeda(custoRealProduto(p))}</td>
       <td>${formatarMoeda(p.valor_venda)}</td>
       <td class="acoes" onclick="event.stopPropagation()">
         <button onclick="abrirFormProduto(${p.id})" title="${podeEditarProdutos ? 'Ver / Editar todos os dados' : 'Ver dados completos'}">${podeEditarProdutos ? '&#9998;' : '&#128065;'}</button>
@@ -1164,7 +1165,11 @@ function atualizarTabelaProdutos() {
   const mensagemVazio = todos.length
     ? 'Nenhum produto encontrado para essa busca.'
     : 'Nenhum produto cadastrado.';
-  tbody.innerHTML = linhas || `<tr><td colspan="9" class="vazio">${mensagemVazio}</td></tr>`;
+  tbody.innerHTML = linhas || `<tr><td colspan="10" class="vazio">${mensagemVazio}</td></tr>`;
+}
+
+function custoRealProduto(p) {
+  return (Number(p.valor_custo) || 0) + (Number(p.frete_compra) || 0) + (Number(p.outras_despesas) || 0);
 }
 
 function clonarProduto(id) {
