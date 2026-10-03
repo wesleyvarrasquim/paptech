@@ -103,6 +103,8 @@
   .data-table .acoes button:hover, .data-table .acoes label.acao-label:hover { color: var(--accent); }
   .data-table .acoes button.btn-dar-entrada, .data-table .acoes button.btn-emitir-nfe, .data-table .acoes button.btn-gerar-recebimento { font-size: 12px; font-weight: 700; color: var(--accent-2); background: rgba(46,125,50,0.1); border: 1px solid rgba(46,125,50,0.35); border-radius: 999px; padding: 5px 10px; margin-right: 6px; white-space: nowrap; }
   .data-table .acoes button.btn-dar-entrada:hover, .data-table .acoes button.btn-emitir-nfe:hover, .data-table .acoes button.btn-gerar-recebimento:hover { background: var(--accent); color: #fff; }
+  .data-table .acoes button.btn-estornar { font-size: 12px; font-weight: 700; color: var(--perigo); background: rgba(198,40,40,0.08); border: 1px solid rgba(198,40,40,0.35); border-radius: 999px; padding: 5px 10px; margin-right: 6px; white-space: nowrap; }
+  .data-table .acoes button.btn-estornar:hover { background: var(--perigo); color: #fff; }
   .vazio { text-align: center; color: var(--texto-suave); padding: 20px; }
 
   .modal-overlay { position: fixed; inset: 0; background: rgba(20,30,20,0.45); display: none; align-items: center; justify-content: center; z-index: 1000; padding: 20px; }
@@ -1705,6 +1707,7 @@ function renderCompras() {
             <input type="file" accept=".xml" style="display:none" onchange="importarXmlParaCompraExistente(event, ${c.id})">
           </label>
           <button type="button" class="btn-dar-entrada" onclick="darEntradaCompra(${c.id})" title="Dar entrada: lança no estoque e em Contas a Pagar">${entradaDada ? '↻ Refazer Entrada' : '📥 Dar Entrada'}</button>
+          ${entradaDada ? `<button type="button" class="btn-estornar" onclick="estornarEntradaCompra(${c.id})" title="Estorna a entrada: retira do estoque e de Contas a Pagar">↩️ Estornar Entrada</button>` : ''}
           <button onclick="excluirCompra(${c.id})" title="Excluir">&#128465;</button>
         </td>
       </tr>
@@ -2319,6 +2322,29 @@ function confirmarDarEntradaCompra(compraId) {
   alert('Entrada confirmada: o estoque foi atualizado e as parcelas foram lançadas em Contas a Pagar.');
 }
 
+/* "Estornar Entrada": desfaz a entrada dada (retira os itens do estoque e remove as parcelas
+   de Contas a Pagar), sem relançar nada — a compra volta a precisar de "Dar Entrada". */
+function estornarEntradaCompra(compraId) {
+  const compras = loadList('compras');
+  const idx = compras.findIndex(c => c.id === compraId);
+  if (idx === -1) return;
+  const compra = compras[idx];
+  if (!compra.entrada_dada) return;
+
+  if (!confirm(`Estornar a entrada da Compra #${compra.id}? Os itens serão retirados do estoque e as parcelas serão removidas de Contas a Pagar. A compra volta a precisar de "Dar Entrada".`)) {
+    return;
+  }
+
+  reverterEntradaEstoqueCompra(compra.itens || []);
+  removerContasPagarDaCompra(compraId);
+
+  compras[idx] = { ...compra, entrada_dada: false };
+  saveList('compras', compras);
+
+  renderCompras();
+  alert('Entrada estornada: o estoque e as parcelas em Contas a Pagar foram removidos.');
+}
+
 /* ---------- relatorios de compras ---------- */
 
 let relatorioComprasTemp = null;
@@ -2518,6 +2544,7 @@ function renderVendas() {
           <button onclick="abrirFormVendaManual(${v.id})" title="Alterar">&#9998;</button>
           <button type="button" class="btn-emitir-nfe" onclick="abrirEmitirNfeVenda(${v.id})" title="Preencher/emitir a Nota Fiscal desta venda">🧾 Emitir NFe</button>
           <button type="button" class="btn-gerar-recebimento" onclick="abrirGerarRecebimentoVenda(${v.id})" title="Lança em Contas a Receber e dá saída no estoque">${recebimentoGerado ? '↻ Refazer Recebimento' : '💰 Gerar Recebimento'}</button>
+          ${recebimentoGerado ? `<button type="button" class="btn-estornar" onclick="estornarRecebimentoVenda(${v.id})" title="Estorna o recebimento: retira de Contas a Receber e devolve o estoque">↩️ Estornar Recebimento</button>` : ''}
           <button onclick="excluirVenda(${v.id})" title="Excluir">&#128465;</button>
         </td>
       </tr>
@@ -2873,6 +2900,30 @@ function confirmarGerarRecebimentoVenda(vendaId) {
   fecharModal();
   renderVendas();
   alert('Recebimento confirmado: o estoque foi atualizado e as parcelas foram lançadas em Contas a Receber.');
+}
+
+/* "Estornar Recebimento": desfaz o recebimento gerado (remove as parcelas de Contas a Receber
+   e devolve os itens ao estoque), sem relançar nada — a venda volta a precisar de um novo
+   "Emitir NFe" ou "Gerar Recebimento". */
+function estornarRecebimentoVenda(vendaId) {
+  const vendas = loadList('vendas');
+  const idx = vendas.findIndex(v => v.id === vendaId);
+  if (idx === -1) return;
+  const venda = vendas[idx];
+  if (!venda.recebimento_gerado) return;
+
+  if (!confirm(`Estornar o recebimento da Venda #${venda.id}? As parcelas serão removidas de Contas a Receber e os itens voltam ao estoque.`)) {
+    return;
+  }
+
+  reverterEstoqueVenda(venda.itens || []);
+  removerContasReceberDaVenda(vendaId);
+
+  vendas[idx] = { ...venda, recebimento_gerado: false };
+  saveList('vendas', vendas);
+
+  renderVendas();
+  alert('Recebimento estornado: as parcelas foram removidas de Contas a Receber e o estoque foi devolvido.');
 }
 
 function abrirFormVendaManual(id) {
