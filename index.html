@@ -302,6 +302,7 @@
       <button class="nav-btn" data-section="produtos"><span class="icone">⚙️</span>Produtos</button>
       <button class="nav-btn" data-section="compras"><span class="icone">📦</span>Compras</button>
       <button class="nav-btn" data-section="vendas"><span class="icone">🧾</span>Vendas</button>
+      <button class="nav-btn" data-section="notas-fiscais"><span class="icone">📄</span>Notas Fiscais</button>
       <button class="nav-btn" data-section="contas-receber"><span class="icone">📥</span>Contas a Receber</button>
       <button class="nav-btn" data-section="contas-pagar"><span class="icone">📤</span>Contas a Pagar</button>
       <button class="nav-btn" data-section="cobranca"><span class="icone">☎️</span>Cobrança</button>
@@ -321,6 +322,7 @@
     <section id="sec-produtos" class="section" style="display:none"></section>
     <section id="sec-compras" class="section" style="display:none"></section>
     <section id="sec-vendas" class="section" style="display:none"></section>
+    <section id="sec-notas-fiscais" class="section" style="display:none"></section>
     <section id="sec-contas-receber" class="section" style="display:none"></section>
     <section id="sec-contas-pagar" class="section" style="display:none"></section>
     <section id="sec-cobranca" class="section" style="display:none"></section>
@@ -370,6 +372,7 @@ const SECOES_PERMISSAO = [
   ['produtos', 'Produtos'],
   ['compras', 'Compras'],
   ['vendas', 'Vendas'],
+  ['notas-fiscais', 'Notas Fiscais'],
   ['contas-receber', 'Contas a Receber'],
   ['contas-pagar', 'Contas a Pagar'],
   ['cobranca', 'Cobrança'],
@@ -681,6 +684,7 @@ function renderSecao(secao) {
   else if (secao === 'produtos') renderProdutos();
   else if (secao === 'compras') renderCompras();
   else if (secao === 'vendas') renderVendas();
+  else if (secao === 'notas-fiscais') renderNotasFiscais();
   else if (secao === 'contas-receber') renderContas('receber');
   else if (secao === 'contas-pagar') renderContas('pagar');
   else if (secao === 'cobranca') renderCobranca();
@@ -2498,6 +2502,56 @@ function badgeStatusNfVenda(venda) {
   const classe = classePorStatus[status] || 'status-pendente';
   const numero = venda.numero_nf ? ` nº ${escapeHtml(venda.numero_nf)}` : '';
   return `<span class="status-badge ${classe}">${escapeHtml(status)}${numero}</span>`;
+}
+
+/* Tela "Notas Fiscais": lista as vendas cuja Nota Fiscal já foi Emitida
+   ou Cancelada (ignora as ainda Pendentes, que são vistas em Vendas). */
+let filtroNfTemp = '';
+function renderNotasFiscais() {
+  const container = document.getElementById('sec-notas-fiscais');
+  container.innerHTML = `
+    <div class="section-header">
+      <h1>Notas Fiscais</h1>
+    </div>
+    <div class="filtro-periodo-caixa">
+      <label>Filtrar por status:</label>
+      <select id="nf-filtro-status" onchange="filtroNfTemp = this.value; atualizarTabelaNotasFiscais();">
+        <option value="">Todas (Emitidas e Canceladas)</option>
+        <option value="Emitida">Somente Emitidas</option>
+        <option value="Cancelada">Somente Canceladas</option>
+      </select>
+    </div>
+    <table class="data-table">
+      <thead><tr><th>Status</th><th>Número</th><th>Série</th><th>Cliente</th><th>Data de Emissão</th><th>Valor</th><th></th></tr></thead>
+      <tbody id="nf-tbody"></tbody>
+    </table>
+  `;
+  atualizarTabelaNotasFiscais();
+}
+
+function atualizarTabelaNotasFiscais() {
+  const vendas = loadList('vendas');
+  const clientes = loadList('clientes');
+  const relevantes = vendas.filter(v => v.status_nf === 'Emitida' || v.status_nf === 'Cancelada');
+  const filtradas = filtroNfTemp ? relevantes.filter(v => v.status_nf === filtroNfTemp) : relevantes;
+  const ordenadas = filtradas.slice().sort((a, b) => (b.data_emissao_nf || '').localeCompare(a.data_emissao_nf || ''));
+
+  const linhas = ordenadas.map(v => {
+    const cliente = clientes.find(c => c.id === v.cliente_id);
+    return `
+      <tr class="linha-clicavel" onclick="verItensVenda(${v.id})">
+        <td>${badgeStatusNfVenda(v)}</td>
+        <td>${escapeHtml(v.numero_nf || '-')}</td>
+        <td>${escapeHtml(v.serie_nf || '-')}</td>
+        <td>${escapeHtml(cliente ? cliente.razao_social : '-')}</td>
+        <td>${v.data_emissao_nf ? formatarDataBr(v.data_emissao_nf) : '-'}</td>
+        <td>${formatarMoeda(v.valor_total)}</td>
+        <td class="acoes"><button type="button" onclick="event.stopPropagation(); verItensVenda(${v.id})" title="Ver detalhes">👁️</button></td>
+      </tr>
+    `;
+  }).join('');
+
+  document.getElementById('nf-tbody').innerHTML = linhas || '<tr><td colspan="7" class="vazio">Nenhuma nota fiscal emitida ou cancelada ainda.</td></tr>';
 }
 
 function verItensVenda(id) {
