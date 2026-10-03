@@ -101,6 +101,8 @@
   .tag-similar button:hover { color: var(--perigo); }
   .data-table .acoes button, .data-table .acoes label.acao-label { background: none; border: none; cursor: pointer; font-size: 15px; margin-right: 6px; color: var(--texto-suave); display: inline-block; }
   .data-table .acoes button:hover, .data-table .acoes label.acao-label:hover { color: var(--accent); }
+  .data-table .acoes button.btn-dar-entrada, .data-table .acoes button.btn-emitir-nfe, .data-table .acoes button.btn-gerar-recebimento { font-size: 12px; font-weight: 700; color: var(--accent-2); background: rgba(46,125,50,0.1); border: 1px solid rgba(46,125,50,0.35); border-radius: 999px; padding: 5px 10px; margin-right: 6px; white-space: nowrap; }
+  .data-table .acoes button.btn-dar-entrada:hover, .data-table .acoes button.btn-emitir-nfe:hover, .data-table .acoes button.btn-gerar-recebimento:hover { background: var(--accent); color: #fff; }
   .vazio { text-align: center; color: var(--texto-suave); padding: 20px; }
 
   .modal-overlay { position: fixed; inset: 0; background: rgba(20,30,20,0.45); display: none; align-items: center; justify-content: center; z-index: 1000; padding: 20px; }
@@ -1685,7 +1687,7 @@ function renderCompras() {
   const linhas = compras.slice().reverse().map(c => {
     const forn = fornecedores.find(f => f.id === c.fornecedor_id);
     const tipo = c.tipo_pedido || 'Nota Fiscal';
-    const entradaDada = tipo === 'Nota Fiscal';
+    const entradaDada = !!c.entrada_dada;
     return `
       <tr>
         <td>${escapeHtml(forn ? forn.razao_social : 'Fornecedor não cadastrado')}</td>
@@ -1698,11 +1700,11 @@ function renderCompras() {
           <button onclick="verItensCompra(${c.id})" title="Ver itens">&#128065;</button>
           <button onclick="imprimirCompra(${c.id})" title="Imprimir">&#128424;</button>
           <button onclick="abrirFormCompraManual(${c.id})" title="Alterar">&#9998;</button>
-          <label class="acao-label" title="Dar entrada com XML da NF-e">
+          <label class="acao-label" title="Importar/atualizar itens com XML da NF-e">
             &#128196;
             <input type="file" accept=".xml" style="display:none" onchange="importarXmlParaCompraExistente(event, ${c.id})">
           </label>
-          <button onclick="gerarPagamentoCompraExistente(${c.id})" title="Gerar Pagamento (Contas a Pagar)">&#128181;</button>
+          <button type="button" class="btn-dar-entrada" onclick="darEntradaCompra(${c.id})" title="Dar entrada: lança no estoque e em Contas a Pagar">${entradaDada ? '↻ Refazer Entrada' : '📥 Dar Entrada'}</button>
           <button onclick="excluirCompra(${c.id})" title="Excluir">&#128465;</button>
         </td>
       </tr>
@@ -1831,10 +1833,14 @@ function imprimirCompra(id) {
 }
 
 function excluirCompra(id) {
-  if (!confirm('Deseja realmente excluir esta compra? O estoque que entrou será retirado e as parcelas geradas em Contas a Pagar serão removidas.')) return;
   const compras = loadList('compras');
   const compra = compras.find(c => c.id === id);
-  if (compra) {
+  const temEntrada = !!(compra && compra.entrada_dada);
+  const mensagem = temEntrada
+    ? 'Deseja realmente excluir esta compra? O estoque que entrou será retirado e as parcelas geradas em Contas a Pagar serão removidas.'
+    : 'Deseja realmente excluir esta compra?';
+  if (!confirm(mensagem)) return;
+  if (temEntrada) {
     reverterEntradaEstoqueCompra(compra.itens || []);
     removerContasPagarDaCompra(id);
   }
@@ -1855,7 +1861,7 @@ function abrirFormCompraManual(id) {
       <h2 style="margin:0">${registro ? 'Editar Compra #' + registro.id : 'Novo Pedido de Compra'}</h2>
       ${!registro ? `
         <label class="btn-secondary file-label">
-          &#128196; Importar XML da NF-e (dar entrada)
+          &#128196; Importar XML da NF-e
           <input type="file" accept=".xml" style="display:none" onchange="importarXmlNfe(event)">
         </label>
       ` : ''}
@@ -1879,8 +1885,8 @@ function abrirFormCompraManual(id) {
       <div class="campo">
         <label>Tipo de Pedido</label>
         <select id="compra-tipo-pedido">
-          <option value="Nota Fiscal" ${tipoAtual === 'Nota Fiscal' ? 'selected' : ''}>Nota Fiscal (dá entrada no estoque e gera Contas a Pagar)</option>
-          <option value="Orçamento" ${tipoAtual === 'Orçamento' ? 'selected' : ''}>Orçamento (apenas cotação, não movimenta estoque)</option>
+          <option value="Nota Fiscal" ${tipoAtual === 'Nota Fiscal' ? 'selected' : ''}>Nota Fiscal (compra efetiva)</option>
+          <option value="Orçamento" ${tipoAtual === 'Orçamento' ? 'selected' : ''}>Orçamento (apenas cotação)</option>
         </select>
       </div>
       <div class="campo">
@@ -2129,13 +2135,16 @@ function salvarCompraManual(id) {
   const valorTotal = itensCompraTemp.reduce((soma, it) => soma + it.valor_total, 0);
 
   const compras = loadList('compras');
+  let jaTinhaEntrada = false;
 
   if (id) {
     // Edicao: desfaz os efeitos da compra antiga (retira estoque e apaga parcelas antigas)
-    // antes de gravar os novos dados, para nao duplicar nem deixar numeros errados.
+    // antes de gravar os novos dados, para nao duplicar nem deixar numeros errados. Como os
+    // itens podem ter mudado, a entrada precisa ser dada de novo (botão "Dar Entrada").
     const compraAntiga = compras.find(c => c.id === id);
     if (compraAntiga) {
-      if ((compraAntiga.tipo_pedido || 'Nota Fiscal') === 'Nota Fiscal') {
+      jaTinhaEntrada = !!compraAntiga.entrada_dada;
+      if (jaTinhaEntrada) {
         reverterEntradaEstoqueCompra(compraAntiga.itens || []);
       }
       removerContasPagarDaCompra(id);
@@ -2156,6 +2165,7 @@ function salvarCompraManual(id) {
     prazos_pagamento: prazosPagamento,
     valor_total: valorTotal,
     itens: itensCompraTemp,
+    entrada_dada: false,
   };
 
   if (id) {
@@ -2166,13 +2176,11 @@ function salvarCompraManual(id) {
   }
   saveList('compras', compras);
 
-  if (tipoPedido === 'Nota Fiscal') {
-    aplicarEntradaEstoqueCompra(itensCompraTemp);
-    gerarParcelasPagar(compraSalva);
-  }
-
   fecharModal();
   renderCompras();
+  if (jaTinhaEntrada) {
+    alert('Compra atualizada. Como esta compra já tinha entrada dada, o estoque e as parcelas antigas foram revertidos — clique em "Dar Entrada" para lançar os dados atualizados no estoque e em Contas a Pagar.');
+  }
 }
 
 function reverterEntradaEstoqueCompra(itens) {
@@ -2239,50 +2247,76 @@ function gerarParcelasPagarPorDuplicatas(compra, duplicatas) {
   saveList('contas_pagar', contas);
 }
 
-function gerarPagamentoCompraExistente(compraId) {
+/* "Dar Entrada": ação única que lança os itens da compra no estoque e gera as
+   parcelas em Contas a Pagar, tanto para compras lançadas manualmente quanto
+   para compras importadas de XML de NF-e. Enquanto isso não for clicado, a
+   compra existe só como um pedido/registro, sem efeito no estoque ou no financeiro. */
+function darEntradaCompra(compraId) {
   const compras = loadList('compras');
   const compra = compras.find(c => c.id === compraId);
   if (!compra) return;
 
-  const jaTemParcelas = loadList('contas_pagar').some(c => c.compra_id === compraId);
-  if (jaTemParcelas) {
-    if (!confirm('Esta compra já tem parcela(s) em Contas a Pagar. Deseja substituí-las pelas novas parcelas geradas agora?')) {
+  if (compra.entrada_dada) {
+    if (!confirm('Esta compra já teve entrada dada. Deseja refazer a entrada? O estoque e as parcelas lançados anteriormente serão substituídos pelos dados atuais da compra.')) {
       return;
     }
   }
 
+  const temDuplicatasNfe = Array.isArray(compra.duplicatas_nfe) && compra.duplicatas_nfe.length > 0;
+
   abrirModal(`
-    <h2>Gerar Pagamento — Compra #${compra.id}</h2>
+    <h2>Dar Entrada — Compra #${compra.id}</h2>
     <div class="info-cliente-caixa">
       <div><strong>Valor Total da Compra:</strong> ${formatarMoeda(compra.valor_total)}</div>
+      <div>Isso vai adicionar os itens ao estoque e lançar as parcelas em Contas a Pagar.</div>
     </div>
-    <div class="campo">
-      <label>Condição de Pagamento — prazos em dias, separados por / (ex: 30/45/60, máximo 10x). Deixe em branco para à vista.</label>
-      <input type="text" id="gerar-pagamento-prazos" value="${escapeHtml(construirPrazosDisplay(compra))}" placeholder="30/45/60">
-    </div>
+    ${temDuplicatasNfe ? `
+      <div class="info-cliente-caixa">Serão usadas as ${compra.duplicatas_nfe.length} duplicata(s) da NF-e importada (vencimento e valor da própria nota).</div>
+    ` : `
+      <div class="campo">
+        <label>Condição de Pagamento — prazos em dias, separados por / (ex: 30/45/60, máximo 10x). Deixe em branco para à vista.</label>
+        <input type="text" id="dar-entrada-prazos" value="${escapeHtml(construirPrazosDisplay(compra))}" placeholder="30/45/60">
+      </div>
+    `}
     <div class="modal-botoes">
-      <button type="button" class="btn-primary" onclick="confirmarGerarPagamentoCompra(${compra.id})">Gerar Pagamento</button>
+      <button type="button" class="btn-primary" onclick="confirmarDarEntradaCompra(${compra.id})">Confirmar Entrada</button>
       <button type="button" class="btn-secondary" onclick="fecharModal()">Cancelar</button>
     </div>
   `);
 }
 
-function confirmarGerarPagamentoCompra(compraId) {
+function confirmarDarEntradaCompra(compraId) {
   const compras = loadList('compras');
   const idx = compras.findIndex(c => c.id === compraId);
   if (idx === -1) return;
+  const compra = compras[idx];
 
-  const prazos = parsePrazosPagamento(document.getElementById('gerar-pagamento-prazos').value);
-  removerContasPagarDaCompra(compraId);
+  // Se já tinha entrada dada antes (refazendo), desfaz os efeitos antigos primeiro para não duplicar.
+  if (compra.entrada_dada) {
+    reverterEntradaEstoqueCompra(compra.itens || []);
+    removerContasPagarDaCompra(compraId);
+  }
 
-  const compraAtualizada = { ...compras[idx], prazos_pagamento: prazos, duplicatas_nfe: [] };
+  const temDuplicatasNfe = Array.isArray(compra.duplicatas_nfe) && compra.duplicatas_nfe.length > 0;
+  const compraAtualizada = { ...compra, entrada_dada: true, data_entrada: new Date().toISOString().slice(0, 10) };
+
+  if (!temDuplicatasNfe) {
+    const campoPrazos = document.getElementById('dar-entrada-prazos');
+    compraAtualizada.prazos_pagamento = parsePrazosPagamento(campoPrazos ? campoPrazos.value : '');
+  }
+
   compras[idx] = compraAtualizada;
   saveList('compras', compras);
-  gerarParcelasPagar(compraAtualizada);
+  aplicarEntradaEstoqueCompra(compraAtualizada.itens || []);
+  if (temDuplicatasNfe) {
+    gerarParcelasPagarPorDuplicatas(compraAtualizada, compraAtualizada.duplicatas_nfe);
+  } else {
+    gerarParcelasPagar(compraAtualizada);
+  }
 
   fecharModal();
   renderCompras();
-  alert('Pagamento gerado e lançado em Contas a Pagar.');
+  alert('Entrada confirmada: o estoque foi atualizado e as parcelas foram lançadas em Contas a Pagar.');
 }
 
 /* ---------- relatorios de compras ---------- */
@@ -2468,6 +2502,7 @@ function renderVendas() {
 
   const linhas = vendas.slice().reverse().map(v => {
     const cliente = clientes.find(c => c.id === v.cliente_id);
+    const recebimentoGerado = !!v.recebimento_gerado;
     return `
       <tr>
         <td>${escapeHtml(cliente ? cliente.razao_social : 'Cliente não cadastrado')}</td>
@@ -2476,10 +2511,13 @@ function renderVendas() {
         <td>${escapeHtml(v.vendedor || '-')}</td>
         <td>${formatarMoeda(v.valor_total)}</td>
         <td>${badgeStatusNfVenda(v)}</td>
+        <td><span class="status-badge ${recebimentoGerado ? 'status-pago' : 'status-vencido'}">${recebimentoGerado ? '✓ Gerado' : '✗ Pendente'}</span></td>
         <td class="acoes">
           <button onclick="verItensVenda(${v.id})" title="Ver itens">&#128065;</button>
           <button onclick="imprimirVenda(${v.id})" title="Imprimir">&#128424;</button>
           <button onclick="abrirFormVendaManual(${v.id})" title="Alterar">&#9998;</button>
+          <button type="button" class="btn-emitir-nfe" onclick="abrirEmitirNfeVenda(${v.id})" title="Preencher/emitir a Nota Fiscal desta venda">🧾 Emitir NFe</button>
+          <button type="button" class="btn-gerar-recebimento" onclick="abrirGerarRecebimentoVenda(${v.id})" title="Lança em Contas a Receber e dá saída no estoque">${recebimentoGerado ? '↻ Refazer Recebimento' : '💰 Gerar Recebimento'}</button>
           <button onclick="excluirVenda(${v.id})" title="Excluir">&#128465;</button>
         </td>
       </tr>
@@ -2494,9 +2532,10 @@ function renderVendas() {
         <button class="btn-primary" onclick="abrirFormVendaManual()">+ Nova Venda</button>
       </div>
     </div>
+    <div class="aviso">Gerar uma venda só cria o pedido. Para dar saída no estoque e lançar em Contas a Receber, use "Emitir NFe" (marcando a nota como Emitida) ou "Gerar Recebimento".</div>
     <table class="data-table">
-      <thead><tr><th>Cliente</th><th>Número</th><th>Data</th><th>Vendedor</th><th>Valor Total</th><th>Nota Fiscal</th><th></th></tr></thead>
-      <tbody>${linhas || `<tr><td colspan="7" class="vazio">Nenhuma venda lançada.</td></tr>`}</tbody>
+      <thead><tr><th>Cliente</th><th>Número</th><th>Data</th><th>Vendedor</th><th>Valor Total</th><th>Nota Fiscal</th><th>Recebimento</th><th></th></tr></thead>
+      <tbody>${linhas || `<tr><td colspan="8" class="vazio">Nenhuma venda lançada.</td></tr>`}</tbody>
     </table>
   `;
 }
@@ -2671,15 +2710,169 @@ function imprimirVenda(id) {
 }
 
 function excluirVenda(id) {
-  if (!confirm('Deseja realmente excluir esta venda? O estoque baixado será devolvido e as parcelas geradas em Contas a Receber serão removidas.')) return;
   const vendas = loadList('vendas');
   const venda = vendas.find(v => v.id === id);
-  if (venda) {
+  const temRecebimento = !!(venda && venda.recebimento_gerado);
+  const mensagem = temRecebimento
+    ? 'Deseja realmente excluir esta venda? O estoque baixado será devolvido e as parcelas geradas em Contas a Receber serão removidas.'
+    : 'Deseja realmente excluir esta venda?';
+  if (!confirm(mensagem)) return;
+  if (temRecebimento) {
     reverterEstoqueVenda(venda.itens || []);
     removerContasReceberDaVenda(id);
   }
   saveList('vendas', vendas.filter(v => v.id !== id));
   renderVendas();
+}
+
+/* "Emitir NFe": grava os dados da Nota Fiscal (status, número, série, data, chave de acesso)
+   e, ao marcar como Emitida, dá saída no estoque e lança as parcelas em Contas a Receber —
+   mesmo efeito de "Gerar Recebimento", só que junto com o registro da nota. */
+function abrirEmitirNfeVenda(vendaId) {
+  const venda = loadList('vendas').find(v => v.id === vendaId);
+  if (!venda) return;
+
+  abrirModal(`
+    <h2>Emitir Nota Fiscal — Venda #${venda.id}</h2>
+    <div class="aviso">Preencha estes dados depois que a Nota Fiscal de venda for emitida (no seu emissor fiscal/contador). Aqui o sistema só guarda o registro — não emite a NF-e junto à SEFAZ. Marcar como "Emitida" dá saída no estoque e lança as parcelas em Contas a Receber.</div>
+    <div class="campo">
+      <label>Status da Nota Fiscal</label>
+      <select id="nfe-venda-status">
+        <option value="Pendente" ${venda.status_nf !== 'Emitida' && venda.status_nf !== 'Cancelada' ? 'selected' : ''}>Pendente de emissão</option>
+        <option value="Emitida" ${venda.status_nf === 'Emitida' ? 'selected' : ''}>Emitida</option>
+        <option value="Cancelada" ${venda.status_nf === 'Cancelada' ? 'selected' : ''}>Cancelada</option>
+      </select>
+    </div>
+    <div class="campo">
+      <label>Número da NF-e</label>
+      <input type="text" id="nfe-venda-numero" value="${escapeHtml(venda.numero_nf || '')}" placeholder="Ex: 000123">
+    </div>
+    <div class="campo">
+      <label>Série</label>
+      <input type="text" id="nfe-venda-serie" value="${escapeHtml(venda.serie_nf || '1')}" placeholder="Ex: 1">
+    </div>
+    <div class="campo">
+      <label>Data de Emissão</label>
+      <input type="date" id="nfe-venda-data-emissao" value="${escapeHtml(venda.data_emissao_nf || new Date().toISOString().slice(0, 10))}">
+    </div>
+    <div class="campo">
+      <label>Chave de Acesso (44 dígitos)</label>
+      <input type="text" id="nfe-venda-chave" value="${escapeHtml(venda.chave_nfe || '')}" placeholder="Somente números, 44 dígitos" maxlength="44">
+    </div>
+    ${!venda.recebimento_gerado ? `
+      <div class="campo">
+        <label>Condição de Pagamento — prazos em dias, separados por / (ex: 30/45/60, máximo 10x). Deixe em branco para à vista.</label>
+        <input type="text" id="nfe-venda-prazos" value="${escapeHtml(construirPrazosDisplay(venda))}" placeholder="30/45/60">
+      </div>
+    ` : '<div class="aviso">Esta venda já tem recebimento gerado. Alterar a Nota Fiscal agora não vai refazer o estoque/Contas a Receber — use "Gerar Recebimento" para isso.</div>'}
+    <div class="modal-botoes">
+      <button type="button" class="btn-primary" onclick="confirmarEmitirNfeVenda(${venda.id})">Salvar</button>
+      <button type="button" class="btn-secondary" onclick="fecharModal()">Cancelar</button>
+    </div>
+  `);
+}
+
+function confirmarEmitirNfeVenda(vendaId) {
+  const vendas = loadList('vendas');
+  const idx = vendas.findIndex(v => v.id === vendaId);
+  if (idx === -1) return;
+  const venda = vendas[idx];
+
+  const status = document.getElementById('nfe-venda-status').value;
+  const numeroNf = document.getElementById('nfe-venda-numero').value.trim();
+  const serieNf = document.getElementById('nfe-venda-serie').value.trim();
+  const dataEmissaoNf = document.getElementById('nfe-venda-data-emissao').value;
+  const chaveNfe = document.getElementById('nfe-venda-chave').value.replace(/\D/g, '');
+  if (chaveNfe && chaveNfe.length !== 44) {
+    alert('A Chave de Acesso da NF-e deve ter 44 dígitos (somente números). Deixe em branco se ainda não tiver.');
+    return;
+  }
+
+  const vendaAtualizada = {
+    ...venda,
+    status_nf: status,
+    numero_nf: numeroNf,
+    serie_nf: serieNf,
+    data_emissao_nf: dataEmissaoNf,
+    chave_nfe: chaveNfe,
+  };
+
+  // Marcar como Emitida dá saída no estoque e lança Contas a Receber, se ainda não gerado
+  // (o mesmo efeito de "Gerar Recebimento", feito junto com o registro da nota).
+  if (status === 'Emitida' && !venda.recebimento_gerado) {
+    const campoPrazos = document.getElementById('nfe-venda-prazos');
+    vendaAtualizada.prazos_pagamento = parsePrazosPagamento(campoPrazos ? campoPrazos.value : '');
+    vendaAtualizada.recebimento_gerado = true;
+    vendas[idx] = vendaAtualizada;
+    saveList('vendas', vendas);
+    aplicarBaixaEstoqueVenda(vendaAtualizada.itens || []);
+    gerarParcelasReceber(vendaAtualizada);
+    fecharModal();
+    renderVendas();
+    alert('Nota Fiscal emitida: o estoque foi atualizado e as parcelas foram lançadas em Contas a Receber.');
+    return;
+  }
+
+  vendas[idx] = vendaAtualizada;
+  saveList('vendas', vendas);
+  fecharModal();
+  renderVendas();
+}
+
+/* "Gerar Recebimento": dá saída no estoque e lança as parcelas em Contas a Receber
+   independentemente da Nota Fiscal — para quando a venda é finalizada sem (ainda) emitir a NF-e. */
+function abrirGerarRecebimentoVenda(vendaId) {
+  const venda = loadList('vendas').find(v => v.id === vendaId);
+  if (!venda) return;
+
+  if (venda.recebimento_gerado) {
+    if (!confirm('Esta venda já teve recebimento gerado. Deseja refazer? O estoque e as parcelas lançados anteriormente serão substituídos pelos dados atuais da venda.')) {
+      return;
+    }
+  }
+
+  abrirModal(`
+    <h2>Gerar Recebimento — Venda #${venda.id}</h2>
+    <div class="info-cliente-caixa">
+      <div><strong>Valor Total da Venda:</strong> ${formatarMoeda(venda.valor_total)}</div>
+      <div>Isso vai dar saída nos itens do estoque e lançar as parcelas em Contas a Receber.</div>
+    </div>
+    <div class="campo">
+      <label>Condição de Pagamento — prazos em dias, separados por / (ex: 30/45/60, máximo 10x). Deixe em branco para à vista.</label>
+      <input type="text" id="recebimento-venda-prazos" value="${escapeHtml(construirPrazosDisplay(venda))}" placeholder="30/45/60">
+    </div>
+    <div class="modal-botoes">
+      <button type="button" class="btn-primary" onclick="confirmarGerarRecebimentoVenda(${venda.id})">Confirmar Recebimento</button>
+      <button type="button" class="btn-secondary" onclick="fecharModal()">Cancelar</button>
+    </div>
+  `);
+}
+
+function confirmarGerarRecebimentoVenda(vendaId) {
+  const vendas = loadList('vendas');
+  const idx = vendas.findIndex(v => v.id === vendaId);
+  if (idx === -1) return;
+  const venda = vendas[idx];
+
+  if (venda.recebimento_gerado) {
+    reverterEstoqueVenda(venda.itens || []);
+    removerContasReceberDaVenda(vendaId);
+  }
+
+  const campoPrazos = document.getElementById('recebimento-venda-prazos');
+  const vendaAtualizada = {
+    ...venda,
+    prazos_pagamento: parsePrazosPagamento(campoPrazos ? campoPrazos.value : ''),
+    recebimento_gerado: true,
+  };
+  vendas[idx] = vendaAtualizada;
+  saveList('vendas', vendas);
+  aplicarBaixaEstoqueVenda(vendaAtualizada.itens || []);
+  gerarParcelasReceber(vendaAtualizada);
+
+  fecharModal();
+  renderVendas();
+  alert('Recebimento confirmado: o estoque foi atualizado e as parcelas foram lançadas em Contas a Receber.');
 }
 
 function abrirFormVendaManual(id) {
@@ -2695,7 +2888,6 @@ function abrirFormVendaManual(id) {
     <div class="tabs">
       <button type="button" class="tab-btn active" onclick="mostrarAbaProduto(this, 'aba-venda-dados')">Dados do Pedido</button>
       <button type="button" class="tab-btn" onclick="mostrarAbaProduto(this, 'aba-venda-transporte')">Transporte e Pagamento</button>
-      <button type="button" class="tab-btn" onclick="mostrarAbaProduto(this, 'aba-venda-nf')">Nota Fiscal</button>
       <button type="button" class="tab-btn" onclick="mostrarAbaProduto(this, 'aba-venda-itens')">Itens do Pedido</button>
     </div>
 
@@ -2756,34 +2948,6 @@ function abrirFormVendaManual(id) {
       <div class="campo">
         <label>Condição de Pagamento — prazos em dias, separados por / (ex: 30/45/60, máximo 10x)</label>
         <input type="text" id="venda-prazos-pagamento" value="${escapeHtml(construirPrazosDisplay(registro))}" placeholder="30/45/60">
-      </div>
-    </div>
-
-    <div id="aba-venda-nf" class="tab-content" style="display:none">
-      <div class="aviso">Preencha estes dados depois que a Nota Fiscal de venda for emitida (no seu emissor fiscal/contador). Aqui o sistema só guarda o registro — não emite a NF-e junto à SEFAZ.</div>
-      <div class="campo">
-        <label>Status da Nota Fiscal</label>
-        <select id="venda-status-nf">
-          <option value="Pendente" ${!registro || registro.status_nf !== 'Emitida' ? 'selected' : ''}>Pendente de emissão</option>
-          <option value="Emitida" ${registro && registro.status_nf === 'Emitida' ? 'selected' : ''}>Emitida</option>
-          <option value="Cancelada" ${registro && registro.status_nf === 'Cancelada' ? 'selected' : ''}>Cancelada</option>
-        </select>
-      </div>
-      <div class="campo">
-        <label>Número da NF-e</label>
-        <input type="text" id="venda-numero-nf" value="${escapeHtml(registro ? (registro.numero_nf || '') : '')}" placeholder="Ex: 000123">
-      </div>
-      <div class="campo">
-        <label>Série</label>
-        <input type="text" id="venda-serie-nf" value="${escapeHtml(registro ? (registro.serie_nf || '1') : '1')}" placeholder="Ex: 1">
-      </div>
-      <div class="campo">
-        <label>Data de Emissão</label>
-        <input type="date" id="venda-data-emissao-nf" value="${escapeHtml(registro ? (registro.data_emissao_nf || '') : '')}">
-      </div>
-      <div class="campo">
-        <label>Chave de Acesso (44 dígitos)</label>
-        <input type="text" id="venda-chave-nfe" value="${escapeHtml(registro ? (registro.chave_nfe || '') : '')}" placeholder="Somente números, 44 dígitos" maxlength="44">
       </div>
     </div>
 
@@ -3075,16 +3239,6 @@ function salvarVendaManual(id) {
   const especie = document.getElementById('venda-especie').value.trim();
   const prazosPagamento = parsePrazosPagamento(document.getElementById('venda-prazos-pagamento').value);
 
-  const statusNf = document.getElementById('venda-status-nf').value;
-  const numeroNf = document.getElementById('venda-numero-nf').value.trim();
-  const serieNf = document.getElementById('venda-serie-nf').value.trim();
-  const dataEmissaoNf = document.getElementById('venda-data-emissao-nf').value;
-  const chaveNfe = document.getElementById('venda-chave-nfe').value.replace(/\D/g, '');
-  if (chaveNfe && chaveNfe.length !== 44) {
-    alert('A Chave de Acesso da NF-e deve ter 44 dígitos (somente números). Deixe em branco se ainda não tiver.');
-    return;
-  }
-
   const valorTotal = itensVendaTemp.reduce((soma, it) => soma + it.valor_total, 0);
   const produtos = loadList('produtos');
   const pesoTotal = itensVendaTemp.reduce((soma, item) => {
@@ -3093,12 +3247,16 @@ function salvarVendaManual(id) {
   }, 0);
 
   const vendas = loadList('vendas');
+  const vendaAntiga = id ? vendas.find(v => v.id === id) : null;
+  let jaTinhaRecebimento = false;
 
-  if (id) {
+  if (id && vendaAntiga) {
     // Edicao: desfaz os efeitos da venda antiga (devolve estoque e apaga parcelas antigas)
-    // antes de gravar os novos dados, para nao duplicar nem deixar numeros errados.
-    const vendaAntiga = vendas.find(v => v.id === id);
-    if (vendaAntiga) {
+    // antes de gravar os novos dados, para nao duplicar nem deixar numeros errados. Como os
+    // itens podem ter mudado, o recebimento precisa ser gerado de novo (botão "Gerar Recebimento"
+    // ou "Emitir NFe").
+    jaTinhaRecebimento = !!vendaAntiga.recebimento_gerado;
+    if (jaTinhaRecebimento) {
       reverterEstoqueVenda(vendaAntiga.itens || []);
       removerContasReceberDaVenda(id);
     }
@@ -3118,11 +3276,12 @@ function salvarVendaManual(id) {
     especie: especie,
     peso_total: pesoTotal,
     prazos_pagamento: prazosPagamento,
-    status_nf: statusNf,
-    numero_nf: numeroNf,
-    serie_nf: serieNf,
-    data_emissao_nf: dataEmissaoNf,
-    chave_nfe: chaveNfe,
+    status_nf: vendaAntiga ? (vendaAntiga.status_nf || 'Pendente') : 'Pendente',
+    numero_nf: vendaAntiga ? (vendaAntiga.numero_nf || '') : '',
+    serie_nf: vendaAntiga ? (vendaAntiga.serie_nf || '1') : '1',
+    data_emissao_nf: vendaAntiga ? (vendaAntiga.data_emissao_nf || '') : '',
+    chave_nfe: vendaAntiga ? (vendaAntiga.chave_nfe || '') : '',
+    recebimento_gerado: false,
   };
 
   if (id) {
@@ -3132,10 +3291,11 @@ function salvarVendaManual(id) {
     vendas.push(vendaSalva);
   }
   saveList('vendas', vendas);
-  aplicarBaixaEstoqueVenda(itensVendaTemp);
-  gerarParcelasReceber(vendaSalva);
   fecharModal();
   renderVendas();
+  if (jaTinhaRecebimento) {
+    alert('Venda atualizada. Como esta venda já tinha recebimento gerado, o estoque e as parcelas antigas foram revertidos — use "Emitir NFe" ou "Gerar Recebimento" para lançar os dados atualizados.');
+  }
 }
 
 function reverterEstoqueVenda(itens) {
@@ -4356,9 +4516,9 @@ function abrirRevisaoImportacaoXml() {
   const { fornecedorDados, numeroNf, duplicatas, itens, compraIdExistente } = importacaoXmlTemp;
   const produtos = loadList('produtos');
   const tituloRevisao = compraIdExistente
-    ? `Dar Entrada na Compra #${compraIdExistente} com XML — NF ${escapeHtml(numeroNf || '(sem número)')}`
+    ? `Atualizar Compra #${compraIdExistente} com XML — NF ${escapeHtml(numeroNf || '(sem número)')}`
     : `Revisar Importação de XML — NF ${escapeHtml(numeroNf || '(sem número)')}`;
-  const textoBotaoConfirmar = compraIdExistente ? 'Confirmar Entrada' : 'Confirmar Importação';
+  const textoBotaoConfirmar = 'Confirmar Importação';
 
   const itensNovos = itens.filter(it => !it.produto_id);
   const itensExistentes = itens.filter(it => it.produto_id);
@@ -4410,9 +4570,9 @@ function abrirRevisaoImportacaoXml() {
       </table>
     ` : ''}
 
-    <h3 style="margin-top:16px">Condição de Pagamento — Contas a Pagar</h3>
+    <h3 style="margin-top:16px">Condição de Pagamento</h3>
     ${duplicatas.length ? `
-      <div class="info-cliente-caixa">Encontradas ${duplicatas.length} duplicata(s) no XML da NF-e. Os vencimentos e valores abaixo serão usados para lançar as parcelas em Contas a Pagar.</div>
+      <div class="info-cliente-caixa">Encontradas ${duplicatas.length} duplicata(s) no XML da NF-e. Esses vencimentos e valores serão usados quando você clicar em "Dar Entrada" para lançar as parcelas em Contas a Pagar.</div>
       <table class="data-table">
         <thead><tr><th>Parcela</th><th>Vencimento</th><th>Valor</th></tr></thead>
         <tbody>
@@ -4427,7 +4587,7 @@ function abrirRevisaoImportacaoXml() {
       </table>
     ` : `
       <div class="campo">
-        <label>O XML não trouxe duplicatas (cobr/dup). Informe os prazos manualmente — dias separados por / (ex: 30/45/60, máximo 10x). Deixe em branco para à vista.</label>
+        <label>O XML não trouxe duplicatas (cobr/dup). Informe os prazos — dias separados por / (ex: 30/45/60, máximo 10x). Deixe em branco para à vista. Isso só é usado quando você clicar em "Dar Entrada".</label>
         <input type="text" id="imp-xml-prazos-manual" placeholder="30/45/60">
       </div>
     `}
@@ -4526,9 +4686,9 @@ function confirmarImportacaoXmlNfe() {
   const totalCadastrados = itensNovos.length;
 
   if (compraIdExistente) {
-    // Dar entrada com XML num pedido ja existente: atualiza o mesmo registro em vez de criar outro.
-    // Se o pedido ja tinha dado entrada antes (tipo Nota Fiscal), desfaz o estoque/parcelas antigos
-    // primeiro, para a nova entrada (vinda do XML) nao somar em duplicidade.
+    // Importar XML num pedido ja existente: atualiza o mesmo registro em vez de criar outro.
+    // Se o pedido ja tinha dado entrada antes, desfaz o estoque/parcelas antigos primeiro
+    // (os itens podem ter mudado) — a entrada precisa ser dada de novo, pelo botão "Dar Entrada".
     const idx = compras.findIndex(c => c.id === compraIdExistente);
     if (idx === -1) {
       alert('Compra não encontrada (pode ter sido excluída). A importação foi cancelada.');
@@ -4537,7 +4697,8 @@ function confirmarImportacaoXmlNfe() {
       return;
     }
     const compraAntiga = compras[idx];
-    if ((compraAntiga.tipo_pedido || 'Nota Fiscal') === 'Nota Fiscal') {
+    const jaTinhaEntrada = !!compraAntiga.entrada_dada;
+    if (jaTinhaEntrada) {
       reverterEntradaEstoqueCompra(compraAntiga.itens || []);
     }
     removerContasPagarDaCompra(compraIdExistente);
@@ -4553,22 +4714,17 @@ function confirmarImportacaoXmlNfe() {
       duplicatas_nfe: duplicatasFinais,
       valor_total: valorTotalCompra,
       itens: itensCompra,
+      entrada_dada: false,
     };
     compras[idx] = compraAtualizada;
     saveList('compras', compras);
-    aplicarEntradaEstoqueCompra(itensCompra);
-    if (duplicatasFinais.length) {
-      gerarParcelasPagarPorDuplicatas(compraAtualizada, duplicatasFinais);
-    } else {
-      gerarParcelasPagar(compraAtualizada);
-    }
 
     importacaoXmlTemp = null;
     fecharModal();
     renderCompras();
-    alert(`Entrada dada na Compra #${compraIdExistente} com o XML da NF-e ${numeroNf || '(sem número)'}.` +
+    alert(`Compra #${compraIdExistente} atualizada com o XML da NF-e ${numeroNf || '(sem número)'}.` +
       (totalCadastrados ? ` ${totalCadastrados} produto(s) novo(s) cadastrado(s) automaticamente.` : '') +
-      ' O estoque foi atualizado e as parcelas foram lançadas em Contas a Pagar.');
+      ' Clique em "Dar Entrada" para lançar no estoque e em Contas a Pagar.');
     return;
   }
 
@@ -4587,22 +4743,17 @@ function confirmarImportacaoXmlNfe() {
     duplicatas_nfe: duplicatasFinais,
     valor_total: valorTotalCompra,
     itens: itensCompra,
+    entrada_dada: false,
   };
   compras.push(compraImportada);
   saveList('compras', compras);
-  aplicarEntradaEstoqueCompra(itensCompra);
-  if (duplicatasFinais.length) {
-    gerarParcelasPagarPorDuplicatas(compraImportada, duplicatasFinais);
-  } else {
-    gerarParcelasPagar(compraImportada);
-  }
 
   importacaoXmlTemp = null;
   fecharModal();
   renderCompras();
   alert(`NF-e ${numeroNf || '(sem número)'} importada com ${itens.length} item(ns).` +
     (totalCadastrados ? ` ${totalCadastrados} produto(s) novo(s) cadastrado(s) automaticamente.` : '') +
-    ' O estoque foi atualizado e as parcelas foram lançadas em Contas a Pagar.');
+    ' Clique em "Dar Entrada" na lista de Compras para lançar no estoque e em Contas a Pagar.');
 }
 
 /* ---------- dashboard ---------- */
