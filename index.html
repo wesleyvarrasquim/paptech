@@ -518,6 +518,7 @@ let produtoSelecionadoCompra = null;
 let produtoSelecionadoMovimento = null;
 let similaresProdutoTemp = [];
 let fotoProdutoTemp = null;
+let produtoEmEdicaoId = null;
 let filtroContasTemp = { receber: { inicio: '', fim: '' }, pagar: { inicio: '', fim: '' } };
 
 /* ---------- utilidades gerais ---------- */
@@ -1279,6 +1280,7 @@ function atualizarTelefoneFornecedorProduto() {
 }
 
 function abrirFormProduto(id) {
+  produtoEmEdicaoId = id || null;
   const lista = loadList('produtos');
   const registro = id ? lista.find(p => p.id === id) : null;
   const fornecedoresCadastrados = loadList('fornecedores');
@@ -1461,11 +1463,67 @@ function adicionarSimilarProduto() {
     alert('Informe o código similar.');
     return;
   }
+  if (similaresProdutoTemp.some(item => item.codigo === codigo && (item.marca || '') === marca)) {
+    alert('Esse código similar já foi adicionado.');
+    return;
+  }
+
+  const marcaAtual = (document.getElementById('campo-marca').value || '').trim();
+  const marcaDiferente = !!(marca && marcaAtual && normalizarTextoBusca(marca) !== normalizarTextoBusca(marcaAtual));
+
   similaresProdutoTemp.push({ codigo, marca });
   codigoEl.value = '';
   marcaEl.value = '';
   codigoEl.focus();
   renderSimilaresProdutoTemp();
+
+  if (marcaDiferente) {
+    clonarProdutoParaSimilarDeOutraMarca(codigo, marca, marcaAtual);
+  }
+}
+
+/* Quando um similar é adicionado com uma marca diferente da marca do produto que está sendo
+   editado, cria automaticamente um cadastro de produto separado para essa outra marca (mesmo
+   padrão do botão "Clonar Produto", com estoque zerado para o usuário ajustar) — marcas
+   diferentes de uma mesma peça normalmente têm estoque e preço próprios. O produto clonado já
+   fica com uma referência de similar de volta para o produto original, para a busca encontrar
+   os dois lados. Só acontece com produtos já salvos (com id); num cadastro novo ainda não
+   salvo, o similar é só adicionado à lista normalmente. */
+function clonarProdutoParaSimilarDeOutraMarca(codigoSimilar, marcaSimilar, marcaOriginal) {
+  if (!produtoEmEdicaoId) {
+    alert(`Similar da marca "${marcaSimilar}" adicionado à lista. Como este produto ainda não foi salvo, a clonagem automática para essa marca só ocorre depois que você salvar o produto pela primeira vez.`);
+    return;
+  }
+
+  const lista = loadList('produtos');
+  const original = lista.find(p => p.id === produtoEmEdicaoId);
+  if (!original) return;
+
+  const jaExisteProdutoParaEssaMarca = lista.some(p =>
+    p.id !== original.id &&
+    normalizarTextoBusca(p.cod_original || '') === normalizarTextoBusca(codigoSimilar) &&
+    normalizarTextoBusca(p.marca || '') === normalizarTextoBusca(marcaSimilar)
+  );
+  if (jaExisteProdutoParaEssaMarca) {
+    alert(`Já existe um produto cadastrado com o código "${codigoSimilar}" da marca "${marcaSimilar}" — nenhum novo cadastro foi criado.`);
+    return;
+  }
+
+  const clone = JSON.parse(JSON.stringify(original));
+  clone.id = nextId(lista);
+  clone.cod_interno = gerarCodigoInternoAleatorio();
+  clone.cod_original = codigoSimilar;
+  clone.marca = marcaSimilar;
+  clone.estoque_atual = 0;
+  clone.similares = (Array.isArray(original.similares) ? original.similares : [])
+    .filter(item => !(item && item.codigo === codigoSimilar && (item.marca || '') === marcaSimilar));
+  if (original.cod_original) {
+    clone.similares.push({ codigo: original.cod_original, marca: marcaOriginal });
+  }
+
+  lista.push(clone);
+  saveList('produtos', lista);
+  alert(`Produto clonado automaticamente para a marca "${marcaSimilar}" (código ${codigoSimilar}), com estoque zerado. Ajuste os dados dele quando quiser, em Produtos.`);
 }
 
 function removerSimilarProduto(indice) {
