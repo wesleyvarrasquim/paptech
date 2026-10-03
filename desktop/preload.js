@@ -21,6 +21,20 @@ contextBridge.exposeInMainWorld('dbAPI', {
   },
 });
 
+contextBridge.exposeInMainWorld('updateAPI', {
+  // Busca/aplica atualizações da TELA do sistema direto do GitHub (ver
+  // src/atualizador.js) — usa internet só nesse momento, não no dia a dia.
+  verificar() {
+    return ipcRenderer.invoke('update-verificar');
+  },
+  instalar() {
+    return ipcRenderer.invoke('update-instalar');
+  },
+  reiniciar() {
+    ipcRenderer.send('update-reiniciar');
+  },
+});
+
 contextBridge.exposeInMainWorld('redeAPI', {
   obterConfig() {
     return ipcRenderer.sendSync('rede-obter-config');

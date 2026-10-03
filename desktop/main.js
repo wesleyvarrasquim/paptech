@@ -11,6 +11,7 @@ const fs = require('fs');
 const { app, BrowserWindow, ipcMain } = require('electron');
 const { criarRepositorio, caminhoPadrao } = require('./src/db');
 const { criarServidor } = require('./src/servidorRede');
+const atualizador = require('./src/atualizador');
 
 const PORTA_REDE_PADRAO = 3344;
 
@@ -96,6 +97,19 @@ function registrarIpc() {
     if (!resposta.ok) throw new Error(`Servidor respondeu ${resposta.status}`);
     return resposta.json();
   });
+
+  ipcMain.handle('update-verificar', async () => {
+    return atualizador.verificarAtualizacao(app.getPath('userData'));
+  });
+
+  ipcMain.handle('update-instalar', async () => {
+    return atualizador.instalarAtualizacao(app.getPath('userData'));
+  });
+
+  ipcMain.on('update-reiniciar', () => {
+    app.relaunch();
+    app.exit();
+  });
 }
 
 function criarJanela() {
@@ -114,7 +128,7 @@ function criarJanela() {
   // o Electron abra essas janelas normalmente.
   janelaPrincipal.webContents.setWindowOpenHandler(() => ({ action: 'allow' }));
 
-  janelaPrincipal.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  janelaPrincipal.loadFile(atualizador.caminhoRendererAtivo(app.getPath('userData')));
   janelaPrincipal.setMenuBarVisibility(false);
 }
 
@@ -122,6 +136,14 @@ app.whenReady().then(async () => {
   const caminhoDb = caminhoPadrao(app.getPath('userData'));
   repositorio = criarRepositorio(caminhoDb);
   registrarIpc();
+
+  // Garante que existe uma cópia (atualizável) da tela em userData — na
+  // primeira execução, copia a que veio junto com o instalador.
+  atualizador.garantirRendererInicial(
+    app.getPath('userData'),
+    path.join(__dirname, 'renderer', 'index.html'),
+    path.join(__dirname, 'version.json')
+  );
 
   const configRede = obterConfigRede();
   await aplicarModoRede(configRede);

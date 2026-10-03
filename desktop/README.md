@@ -18,7 +18,9 @@ desktop/
   preload.js              Ponte entre a tela e o processo principal
   src/db.js                Banco de dados local (SQLite)
   src/servidorRede.js       Servidor HTTP para o modo "Servidor" da rede local
+  src/atualizador.js         Busca/aplica atualizações da tela direto do GitHub
   renderer/index.html        A tela do PAPTECH (mesmas telas de sempre)
+  version.json                Versão atual publicada (usada pelo atualizador)
 ```
 
 ## Como instalar e rodar (passo a passo)
@@ -74,6 +76,32 @@ Isso é sincronização "ao abrir o programa + a cada salvamento", não tempo
 real: se dois computadores estiverem com uma mesma tela aberta ao mesmo
 tempo, um não vê instantaneamente o que o outro está digitando antes de
 salvar.
+
+## Atualizando a tela sem reinstalar (Configurações → Atualizações do Sistema)
+
+A partir de agora, mudanças feitas só na tela (`renderer/index.html` — a
+maioria dos pedidos de ajuste no sistema) não precisam gerar um novo
+instalador: o programa consegue buscar a versão publicada no GitHub e
+aplicar sozinho.
+
+Como funciona por dentro: o programa não roda mais o `renderer/index.html`
+de dentro da própria pasta de instalação (que fica só leitura depois de
+instalado) — na primeira vez que abre, ele copia esse arquivo para a pasta
+de dados do usuário, e é essa cópia (atualizável) que ele sempre abre. Em
+**Configurações → Atualizações do Sistema**, o botão "Verificar atualização"
+compara a versão instalada com o arquivo `desktop/version.json` do
+repositório; se houver uma mais nova, "Instalar atualização" baixa o
+`renderer/index.html` publicado e substitui essa cópia, reabrindo o
+programa sozinho. Só usa internet nesse momento — o uso do dia a dia (banco
+local + rede local) continua sem depender disso.
+
+**Checklist para toda atualização que eu (Claude) fizer na tela a partir de
+agora:** depois de editar `desktop/renderer/index.html`, também atualizar
+`desktop/version.json` (subir o número de `versao` e escrever em `notas` o
+que mudou) antes do commit/push — é esse arquivo que avisa os programas já
+instalados que existe algo novo. Mudanças só no `main.js`/`preload.js`/
+`src/*.js` (banco local, servidor de rede) não são cobertas por esse
+atualizador — essas ainda exigem gerar um novo instalador.
 
 ## Diferenças em relação à versão de navegador
 

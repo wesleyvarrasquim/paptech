@@ -1,6 +1,6 @@
 {
   "name": "paptech-desktop",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "PAPTECH instalado no computador, com banco de dados local (SQLite) e uso em rede local.",
   "main": "main.js",
   "author": "PAPTECH",
@@ -26,6 +26,7 @@
       "preload.js",
       "src/**/*",
       "renderer/**/*",
+      "version.json",
       "package.json"
     ],
     "win": {

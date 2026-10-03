@@ -4332,6 +4332,14 @@ function renderConfiguracoes() {
     </div>
     <div id="rede-config-area"></div>
 
+    <h2 style="margin-top:28px">Atualizações do Sistema</h2>
+    <div class="aviso">
+      Verifica se existe uma versão mais nova da tela do PAPTECH publicada no GitHub e, se houver,
+      baixa e aplica automaticamente — sem precisar gerar/instalar um novo programa. Precisa de
+      internet só neste momento.
+    </div>
+    <div id="atualizacao-area"></div>
+
     <h2 style="margin-top:28px">Certificado Digital A1 (para emissão de NF-e)</h2>
     <div class="aviso">
       Para emitir Nota Fiscal eletrônica de verdade (autorizada pela SEFAZ), a empresa precisa
@@ -4353,6 +4361,7 @@ function renderConfiguracoes() {
   `;
 
   renderRedeConfig();
+  renderAtualizacaoArea();
 }
 
 function renderRedeConfig() {
@@ -4411,6 +4420,49 @@ function salvarRedeConfigDaTela() {
   window.redeAPI.salvarConfig(novaConfig);
   alert('Configuração de rede salva! Reabra o programa para aplicar (caso esteja ligando/desligando o modo Servidor).');
   renderRedeConfig();
+}
+
+function renderAtualizacaoArea(mensagemStatus) {
+  const area = document.getElementById('atualizacao-area');
+  if (!area) return;
+  area.innerHTML = `
+    <div id="atualizacao-status" class="texto-suave-pequeno" style="margin-bottom:10px">${mensagemStatus || 'Clique em "Verificar atualização" para checar.'}</div>
+    <div class="modal-botoes" style="margin-top:4px">
+      <button type="button" class="btn-secondary" onclick="verificarAtualizacaoSistema()">Verificar atualização</button>
+      <button type="button" class="btn-primary" id="btn-instalar-atualizacao" style="display:none" onclick="instalarAtualizacaoSistema()">Instalar atualização</button>
+    </div>
+  `;
+}
+
+async function verificarAtualizacaoSistema() {
+  renderAtualizacaoArea('Verificando no GitHub...');
+  try {
+    const status = await window.updateAPI.verificar();
+    const botaoInstalar = () => document.getElementById('btn-instalar-atualizacao');
+    if (status.disponivel) {
+      renderAtualizacaoArea(
+        `Versão instalada: ${escapeHtml(status.versaoInstalada)} — Nova versão disponível: ${escapeHtml(status.versaoRemota)}` +
+        (status.notas ? ` — "${escapeHtml(status.notas)}"` : '')
+      );
+      if (botaoInstalar()) botaoInstalar().style.display = '';
+    } else {
+      renderAtualizacaoArea(`Você já está com a versão mais recente (${escapeHtml(status.versaoInstalada)}).`);
+    }
+  } catch (erro) {
+    renderAtualizacaoArea('⚠ Não foi possível verificar agora (sem internet ou GitHub indisponível). Tente novamente mais tarde.');
+  }
+}
+
+async function instalarAtualizacaoSistema() {
+  if (!confirm('Baixar e instalar a atualização agora? O programa vai reabrir sozinho ao terminar.')) return;
+  renderAtualizacaoArea('Baixando e aplicando a atualização...');
+  try {
+    await window.updateAPI.instalar();
+    alert('Atualização instalada! O programa vai reabrir agora.');
+    window.updateAPI.reiniciar();
+  } catch (erro) {
+    renderAtualizacaoArea('⚠ Não foi possível instalar a atualização agora. Tente novamente mais tarde.');
+  }
 }
 
 function previewLogoConfiguracao(event) {
