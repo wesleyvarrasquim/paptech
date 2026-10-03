@@ -372,8 +372,8 @@ const CHAVE_SESSAO_USUARIO = 'westech_sessao_usuario_id';
    (Project Settings -> API: "Project URL" e a chave "anon public").
    Enquanto estiverem em branco, o sistema funciona normalmente, só que
    100% local (como antes), sem compartilhar dados entre computadores. */
-const SUPABASE_URL = '';
-const SUPABASE_ANON_KEY = '';
+const SUPABASE_URL = 'https://cyvnsnebgumnbgfdapit.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN5dm5zbmViZ3VtbmJnZmRhcGl0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA4NzgyOTEsImV4cCI6MjEwNjQ1NDI5MX0.pojOH9crgsCJioR-DoMACmyxfjvdG0O_O_LCyl3JwD0';
 
 const supabaseClient = (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase)
   ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
