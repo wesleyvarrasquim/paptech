@@ -729,11 +729,59 @@ const CAMPOS_PESSOA = [
 const TITULOS_PESSOA = { clientes: 'Clientes', fornecedores: 'Fornecedores', transportadoras: 'Transportadoras' };
 const SINGULAR_PESSOA = { clientes: 'Cliente', fornecedores: 'Fornecedor', transportadoras: 'Transportadora' };
 
+function filtrarPessoasPorTermo(lista, termoBusca) {
+  const fragmentos = normalizarTextoBusca(termoBusca)
+    .split('*')
+    .map(f => f.trim())
+    .filter(Boolean);
+
+  if (!fragmentos.length) return lista;
+
+  return lista.filter(p => {
+    const alvo = normalizarTextoBusca([
+      p.razao_social || '',
+      p.nome_fantasia || '',
+      p.cnpj || '',
+    ].join(' '));
+    return fragmentos.every(frag => alvo.includes(frag));
+  });
+}
+
 function renderPessoaSection(tipo) {
   const titulo = TITULOS_PESSOA[tipo];
   const singular = SINGULAR_PESSOA[tipo];
-  const lista = loadList(tipo);
   const container = document.getElementById('sec-' + tipo);
+  const buscaAtual = buscaPessoaTemp[tipo];
+
+  container.innerHTML = `
+    <div class="section-header">
+      <h1>${titulo}</h1>
+      <button class="btn-primary" onclick="abrirFormPessoa('${tipo}')">+ Cadastrar ${singular}</button>
+    </div>
+    <div class="campo busca-produtos">
+      <label>Pesquisar por nome, CNPJ ou CPF (use * para separar trechos, ex: silva*0001)</label>
+      <input type="text" id="busca-${tipo}" placeholder="Digite para buscar..." value="${escapeHtml(buscaAtual)}" oninput="onBuscaPessoaInput('${tipo}')" autocomplete="off">
+    </div>
+    <table class="data-table">
+      <thead>
+        <tr><th>Razão Social</th><th>CNPJ</th><th>Inscrição Estadual</th><th>Cidade</th><th>UF</th><th>Telefone</th><th></th></tr>
+      </thead>
+      <tbody id="${tipo}-tbody"></tbody>
+    </table>
+  `;
+  atualizarTabelaPessoas(tipo);
+}
+
+function onBuscaPessoaInput(tipo) {
+  buscaPessoaTemp[tipo] = document.getElementById(`busca-${tipo}`).value;
+  atualizarTabelaPessoas(tipo);
+}
+
+function atualizarTabelaPessoas(tipo) {
+  const todos = loadList(tipo);
+  const lista = filtrarPessoasPorTermo(todos, buscaPessoaTemp[tipo]);
+  const tbody = document.getElementById(`${tipo}-tbody`);
+  if (!tbody) return;
 
   const linhas = lista.map(p => `
     <tr>
@@ -750,20 +798,10 @@ function renderPessoaSection(tipo) {
     </tr>
   `).join('');
 
-  container.innerHTML = `
-    <div class="section-header">
-      <h1>${titulo}</h1>
-      <button class="btn-primary" onclick="abrirFormPessoa('${tipo}')">+ Cadastrar ${singular}</button>
-    </div>
-    <table class="data-table">
-      <thead>
-        <tr><th>Razão Social</th><th>CNPJ</th><th>Inscrição Estadual</th><th>Cidade</th><th>UF</th><th>Telefone</th><th></th></tr>
-      </thead>
-      <tbody>
-        ${linhas || `<tr><td colspan="7" class="vazio">Nenhum registro cadastrado.</td></tr>`}
-      </tbody>
-    </table>
-  `;
+  const mensagemVazio = todos.length
+    ? 'Nenhum registro encontrado para essa busca.'
+    : 'Nenhum registro cadastrado.';
+  tbody.innerHTML = linhas || `<tr><td colspan="7" class="vazio">${mensagemVazio}</td></tr>`;
 }
 
 function abrirFormPessoa(tipo, id) {
@@ -895,6 +933,7 @@ const CAMPOS_PRODUTO_ADICIONAIS = [
 ];
 
 let produtosFiltroAtual = '';
+let buscaPessoaTemp = { clientes: '', fornecedores: '', transportadoras: '' };
 
 function normalizarTextoBusca(texto) {
   return String(texto ?? '')
