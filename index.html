@@ -196,6 +196,10 @@
   .btn-excluir { border: 1px solid var(--perigo); color: var(--perigo); }
   .btn-excluir:hover { background: rgba(198,40,40,0.1); color: var(--perigo); }
 
+  .dashboard-logo-painel { display: flex; align-items: center; justify-content: center; background: var(--painel); border: 1px solid var(--borda); border-radius: 16px; padding: 22px; margin-bottom: 22px; min-height: 110px; }
+  .dashboard-logo-img { max-height: 110px; max-width: 100%; object-fit: contain; }
+  .dashboard-logo-vazio { display: flex; flex-direction: column; align-items: center; gap: 6px; color: var(--texto-suave); font-size: 13px; text-align: center; }
+  .dashboard-logo-icone { font-size: 30px; }
   .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; margin-bottom: 28px; }
   .kpi-card { position: relative; overflow: hidden; background: var(--painel); border: 1px solid var(--borda); border-radius: 16px; padding: 18px 20px; }
   .kpi-card::before { content: ''; position: absolute; inset: 0; background: radial-gradient(circle at top right, rgba(46,125,50,0.06), transparent 60%); pointer-events: none; }
@@ -4576,29 +4580,23 @@ function renderDashboard() {
     </div>
   `).join('');
 
+  const config = obterConfiguracoes();
+  const logoDashboardHtml = config.logo_base64
+    ? `<img src="${config.logo_base64}" alt="Logo da empresa" class="dashboard-logo-img">`
+    : `<div class="dashboard-logo-vazio">
+         <span class="dashboard-logo-icone">🏢</span>
+         <span>Nenhum logo cadastrado.<br>Cadastre em Configurações → Logo da Empresa.</span>
+       </div>`;
+
   const container = document.getElementById('sec-dashboard');
   container.innerHTML = `
     <div class="section-header">
       <h1>Dashboard</h1>
     </div>
+    <div class="dashboard-logo-painel">${logoDashboardHtml}</div>
     <p class="launcher-titulo">Acesso rápido</p>
     <div class="launcher-grid">${launcherHtml}</div>
     <div class="kpi-grid">
-      <div class="kpi-card">
-        <span class="kpi-icone">🧑‍🔧</span>
-        <div class="kpi-valor">${clientes.length}</div>
-        <div class="kpi-label">Clientes</div>
-      </div>
-      <div class="kpi-card">
-        <span class="kpi-icone">🏭</span>
-        <div class="kpi-valor">${fornecedores.length}</div>
-        <div class="kpi-label">Fornecedores</div>
-      </div>
-      <div class="kpi-card">
-        <span class="kpi-icone">⚙️</span>
-        <div class="kpi-valor">${produtos.length}</div>
-        <div class="kpi-label">Produtos</div>
-      </div>
       <div class="kpi-card">
         <span class="kpi-icone">📦</span>
         <div class="kpi-valor">${formatarMoeda(valorEmEstoque)}</div>
