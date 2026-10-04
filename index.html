@@ -1268,6 +1268,7 @@ function abrirUltimoMovimentoProduto(produtoId) {
     const cliente = clientes.find(c => c.id === ultimaVenda.venda.cliente_id);
     blocoVenda = `
       <div class="info-cliente-caixa">
+        <div><strong>Data:</strong> ${ultimaVenda.venda.data_venda ? formatarDataBr(ultimaVenda.venda.data_venda) : '-'}</div>
         <div><strong>NF do Cliente:</strong> ${escapeHtml(ultimaVenda.venda.numero_nf || 'Pendente de emissão')}</div>
         <div><strong>Cliente:</strong> ${escapeHtml(cliente ? cliente.razao_social : 'Não cadastrado')}</div>
         <div><strong>Valor Vendido:</strong> ${formatarMoeda(ultimaVenda.item.valor_unitario)}</div>
@@ -1283,6 +1284,7 @@ function abrirUltimoMovimentoProduto(produtoId) {
     const fornecedor = fornecedores.find(f => f.id === ultimaCompra.compra.fornecedor_id);
     blocoCompra = `
       <div class="info-cliente-caixa">
+        <div><strong>Data:</strong> ${ultimaCompra.compra.data_compra ? formatarDataBr(ultimaCompra.compra.data_compra) : '-'}</div>
         <div><strong>NF do Fornecedor:</strong> ${escapeHtml(ultimaCompra.compra.numero_nf || '-')}</div>
         <div><strong>Fornecedor:</strong> ${escapeHtml(fornecedor ? fornecedor.razao_social : 'Não cadastrado')}</div>
         <div><strong>Valor Custo de Entrada:</strong> ${formatarMoeda(ultimaCompra.item.valor_unitario)}</div>
@@ -1292,6 +1294,7 @@ function abrirUltimoMovimentoProduto(produtoId) {
       blocoDevolucao = `
         <h3 style="margin-top:16px">Devolução ao Fornecedor</h3>
         <div class="info-cliente-caixa">
+          <div><strong>Data:</strong> ${ultimaCompra.compra.devolucao_data ? formatarDataBr(ultimaCompra.compra.devolucao_data) : '-'}</div>
           <div><strong>NF de Devolução:</strong> ${escapeHtml(ultimaCompra.compra.devolucao_numero_nf)}</div>
           <div><strong>Fornecedor:</strong> ${escapeHtml(fornecedor ? fornecedor.razao_social : 'Não cadastrado')}</div>
           <div><strong>Valor:</strong> ${formatarMoeda(ultimaCompra.compra.devolucao_valor)}</div>
