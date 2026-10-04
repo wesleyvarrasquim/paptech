@@ -534,6 +534,7 @@ let similaresProdutoTemp = [];
 let fotoProdutoTemp = null;
 let produtoEmEdicaoId = null;
 let filtroContasTemp = { receber: { inicio: '', fim: '' }, pagar: { inicio: '', fim: '' } };
+let relatorioContasTemp = { receber: null, pagar: null };
 
 /* ---------- utilidades gerais ---------- */
 
@@ -5092,7 +5093,10 @@ function renderContas(tipo) {
   container.innerHTML = `
     <div class="section-header">
       <h1>${cfg.titulo}</h1>
-      <button class="btn-primary" onclick="abrirFormConta('${tipo}')">+ Nova Conta</button>
+      <div class="header-botoes">
+        <button class="btn-secondary" onclick="abrirRelatorioContas('${tipo}')">&#128202; Relatório por Período</button>
+        <button class="btn-primary" onclick="abrirFormConta('${tipo}')">+ Nova Conta</button>
+      </div>
     </div>
     <div class="filtro-periodo-caixa">
       <div class="campo">
@@ -5236,6 +5240,189 @@ function excluirConta(tipo, id) {
   const contas = loadList(cfg.storageKey).filter(c => c.id !== id);
   saveList(cfg.storageKey, contas);
   renderContas(tipo);
+}
+
+/* Relatório por período de Contas a Receber/Pagar: resumo (total no período, total já
+   pago/recebido, pendente e vencido) + detalhamento, com opção de imprimir. Usa o mesmo
+   CONFIG_CONTAS que já descreve as diferenças entre "receber" e "pagar". */
+function abrirRelatorioContas(tipo) {
+  const cfg = CONFIG_CONTAS[tipo];
+
+  abrirModal(`
+    <h2>Relatório de ${escapeHtml(cfg.titulo)} por Período</h2>
+    <div class="campo">
+      <label>Situação</label>
+      <select id="rel-contas-status">
+        <option value="">Todas</option>
+        <option value="pendente">Pendentes</option>
+        <option value="pago">${escapeHtml(cfg.labelPago)}s</option>
+        <option value="vencido">Vencidas</option>
+      </select>
+    </div>
+    <div class="item-linha">
+      <div class="campo">
+        <label>Vencimento de</label>
+        <input type="date" id="rel-contas-data-inicio">
+      </div>
+      <div class="campo">
+        <label>até</label>
+        <input type="date" id="rel-contas-data-fim">
+      </div>
+    </div>
+    <div class="modal-botoes">
+      <button type="button" class="btn-primary" onclick="gerarRelatorioContas('${tipo}')">Gerar Relatório</button>
+      <button type="button" class="btn-secondary" onclick="imprimirRelatorioContas('${tipo}')">Imprimir</button>
+      <button type="button" class="btn-secondary" onclick="fecharModal()">Fechar</button>
+    </div>
+    <div id="rel-contas-resultado" style="margin-top:16px"></div>
+  `);
+
+  gerarRelatorioContas(tipo);
+}
+
+function gerarRelatorioContas(tipo) {
+  const cfg = CONFIG_CONTAS[tipo];
+  const statusFiltro = document.getElementById('rel-contas-status').value;
+  const dataInicio = document.getElementById('rel-contas-data-inicio').value;
+  const dataFim = document.getElementById('rel-contas-data-fim').value;
+  const entidades = loadList(cfg.entidadeLista);
+  const hoje = new Date().toISOString().slice(0, 10);
+
+  let contas = loadList(cfg.storageKey);
+  if (dataInicio) contas = contas.filter(c => (c.data_vencimento || '') >= dataInicio);
+  if (dataFim) contas = contas.filter(c => (c.data_vencimento || '') <= dataFim);
+  if (statusFiltro === 'pendente') contas = contas.filter(c => !c[cfg.campoDataPagamento]);
+  if (statusFiltro === 'pago') contas = contas.filter(c => !!c[cfg.campoDataPagamento]);
+  if (statusFiltro === 'vencido') contas = contas.filter(c => !c[cfg.campoDataPagamento] && c.data_vencimento && c.data_vencimento < hoje);
+
+  const totalGeral = contas.reduce((soma, c) => soma + (Number(c.valor) || 0), 0);
+  const totalPago = contas.filter(c => !!c[cfg.campoDataPagamento]).reduce((soma, c) => soma + (Number(c.valor) || 0), 0);
+  const totalPendente = contas.filter(c => !c[cfg.campoDataPagamento]).reduce((soma, c) => soma + (Number(c.valor) || 0), 0);
+  const totalVencido = contas
+    .filter(c => !c[cfg.campoDataPagamento] && c.data_vencimento && c.data_vencimento < hoje)
+    .reduce((soma, c) => soma + (Number(c.valor) || 0), 0);
+
+  const linhasDetalhe = contas
+    .slice()
+    .sort((a, b) => (a.data_vencimento || '').localeCompare(b.data_vencimento || ''))
+    .map(c => {
+      const entidade = entidades.find(e => e.id === c[cfg.campoEntidadeId]);
+      const pago = !!c[cfg.campoDataPagamento];
+      let statusLabel = 'Pendente';
+      if (pago) statusLabel = cfg.labelPago;
+      else if (c.data_vencimento && c.data_vencimento < hoje) statusLabel = 'Vencido';
+      return `
+        <tr>
+          <td>${formatarDataBr(c.data_vencimento)}</td>
+          <td>${escapeHtml(entidade ? entidade.razao_social : `${cfg.labelEntidade} não cadastrado`)}</td>
+          <td>${escapeHtml(c.descricao || '-')}</td>
+          <td>${formatarMoeda(c.valor)}</td>
+          <td>${escapeHtml(statusLabel)}</td>
+          <td>${pago ? formatarDataBr(c[cfg.campoDataPagamento]) : '-'}</td>
+        </tr>
+      `;
+    }).join('');
+
+  const html = `
+    <h3>Resumo</h3>
+    <table class="data-table">
+      <thead><tr><th>Total no Período</th><th>Total ${escapeHtml(cfg.labelPago)}</th><th>Total Pendente</th><th>Total Vencido</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>${formatarMoeda(totalGeral)}</td>
+          <td>${formatarMoeda(totalPago)}</td>
+          <td>${formatarMoeda(totalPendente)}</td>
+          <td>${formatarMoeda(totalVencido)}</td>
+        </tr>
+      </tbody>
+    </table>
+    <h3 style="margin-top:16px">Detalhamento</h3>
+    <table class="data-table">
+      <thead><tr><th>Vencimento</th><th>${escapeHtml(cfg.labelEntidade)}</th><th>Descrição</th><th>Valor</th><th>Status</th><th>${escapeHtml(cfg.labelPago)} em</th></tr></thead>
+      <tbody>${linhasDetalhe || '<tr><td colspan="6" class="vazio">Nenhuma conta encontrada para esse filtro.</td></tr>'}</tbody>
+    </table>
+    <div class="totais-relatorio"><strong>Total Geral:</strong> ${formatarMoeda(totalGeral)} &nbsp; (${contas.length} conta(s))</div>
+  `;
+
+  document.getElementById('rel-contas-resultado').innerHTML = html;
+
+  relatorioContasTemp[tipo] = {
+    statusFiltro, dataInicio, dataFim, linhasDetalhe,
+    totalGeral, totalPago, totalPendente, totalVencido, totalContas: contas.length,
+  };
+}
+
+function imprimirRelatorioContas(tipo) {
+  const cfg = CONFIG_CONTAS[tipo];
+  const dados = relatorioContasTemp[tipo];
+  if (!dados) {
+    alert('Gere o relatório antes de imprimir.');
+    return;
+  }
+  const { statusFiltro, dataInicio, dataFim, linhasDetalhe, totalGeral, totalPago, totalPendente, totalVencido, totalContas } = dados;
+
+  const statusTexto = { pendente: 'Pendentes', pago: `${cfg.labelPago}s`, vencido: 'Vencidas' }[statusFiltro] || 'Todas';
+  const filtrosTexto = [
+    `Situação: ${statusTexto}`,
+    dataInicio ? `Vencimento de: ${formatarDataBr(dataInicio)}` : '',
+    dataFim ? `até: ${formatarDataBr(dataFim)}` : '',
+  ].filter(Boolean).join(' &nbsp;|&nbsp; ');
+
+  const htmlImpressao = `
+    <!DOCTYPE html>
+    <html lang="pt-br">
+    <head>
+      <meta charset="UTF-8">
+      <title>Relatório de ${escapeHtml(cfg.titulo)}</title>
+      <style>
+        body { font-family: Arial, Helvetica, sans-serif; color: #111; padding: 28px; }
+        h1 { font-size: 18px; margin: 0 0 4px; }
+        h3 { font-size: 14px; margin: 18px 0 6px; }
+        .sub { color: #555; font-size: 12px; margin-bottom: 18px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+        th, td { border: 1px solid #999; padding: 6px 8px; font-size: 12px; }
+        th { background: #eee; text-align: left; }
+        .totais { margin-top: 14px; text-align: right; font-size: 14px; font-weight: bold; }
+        @media print { body { padding: 10px; } }
+      </style>
+    </head>
+    <body>
+      <h1>PAPTECH - Relatório de ${escapeHtml(cfg.titulo)}</h1>
+      <div class="sub">${filtrosTexto} &nbsp;|&nbsp; Gerado em: ${formatarDataBr(new Date().toISOString().slice(0, 10))}</div>
+
+      <h3>Resumo</h3>
+      <table>
+        <thead><tr><th>Total no Período</th><th>Total ${escapeHtml(cfg.labelPago)}</th><th>Total Pendente</th><th>Total Vencido</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>${formatarMoeda(totalGeral)}</td>
+            <td>${formatarMoeda(totalPago)}</td>
+            <td>${formatarMoeda(totalPendente)}</td>
+            <td>${formatarMoeda(totalVencido)}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Detalhamento</h3>
+      <table>
+        <thead><tr><th>Vencimento</th><th>${escapeHtml(cfg.labelEntidade)}</th><th>Descrição</th><th>Valor</th><th>Status</th><th>${escapeHtml(cfg.labelPago)} em</th></tr></thead>
+        <tbody>${linhasDetalhe || '<tr><td colspan="6">Nenhuma conta encontrada.</td></tr>'}</tbody>
+      </table>
+
+      <div class="totais">Total Geral: ${formatarMoeda(totalGeral)} (${totalContas} conta(s))</div>
+    </body>
+    </html>
+  `;
+
+  const janela = window.open('', '_blank');
+  if (!janela) {
+    alert('Não foi possível abrir a janela de impressão. Verifique se o navegador está bloqueando pop-ups.');
+    return;
+  }
+  janela.document.write(htmlImpressao);
+  janela.document.close();
+  janela.focus();
+  janela.print();
 }
 
 /* ---------- COBRANCA ---------- */
