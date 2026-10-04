@@ -367,7 +367,7 @@
       <button class="nav-btn" data-section="configuracoes"><span class="icone">⚙️</span>Configurações</button>
     </div>
     <div id="sidebar-usuario-info" class="sidebar-usuario-info"></div>
-    <div id="indicador-sync" class="indicador-sync"></div>
+    <div id="indicador-sync" class="indicador-sync" onclick="mostrarDetalheSync()" title="Clique para ver detalhes"></div>
     <button type="button" class="btn-atualizar-sistema" onclick="atualizarSistema()" title="Busca novamente os dados e a versão mais recente do sistema">🔄 Atualizar Sistema</button>
   </nav>
   <main class="content">
@@ -480,7 +480,10 @@ function nuvemConfigurada() {
   return !!supabaseClient;
 }
 
+let ultimoErroSync = '';
+
 function atualizarIndicadorSync(status, mensagem) {
+  if (status === 'ok') ultimoErroSync = '';
   const el = document.getElementById('indicador-sync');
   if (!el) return;
   el.className = 'indicador-sync ' + (status === 'ok' ? 'sync-ok' : status === 'erro' ? 'sync-erro' : 'sync-off');
@@ -490,6 +493,17 @@ function atualizarIndicadorSync(status, mensagem) {
     off: '☁ Somente local (nuvem não configurada)',
   };
   el.textContent = mensagem || textos[status] || '';
+}
+
+/* Clicar no indicador de sincronização mostra o detalhe técnico do último erro (quando
+   houver) — ajuda a identificar o problema real (ex: coluna/tabela faltando no Supabase)
+   sem precisar abrir o console do navegador. */
+function mostrarDetalheSync() {
+  if (ultimoErroSync) {
+    alert('Detalhe do erro de sincronização:\n\n' + ultimoErroSync);
+  } else {
+    alert('Sincronização com a nuvem funcionando normalmente.');
+  }
 }
 
 /* Botão "Atualizar Sistema": recarrega a página, o que já faz o navegador
@@ -528,6 +542,7 @@ async function sincronizarComNuvem() {
     atualizarIndicadorSync('ok');
   } catch (erro) {
     console.warn('Não foi possível sincronizar com a nuvem, usando dados locais:', erro);
+    ultimoErroSync = (erro && (erro.message || erro.details || erro.hint)) || String(erro);
     atualizarIndicadorSync('erro');
   }
 }
@@ -565,6 +580,7 @@ async function enviarParaNuvem(chave, lista) {
     atualizarIndicadorSync('ok');
   } catch (erro) {
     console.warn(`Não foi possível enviar "${chave}" para a nuvem:`, erro);
+    ultimoErroSync = (erro && (erro.message || erro.details || erro.hint)) || String(erro);
     atualizarIndicadorSync('erro');
   }
 }
