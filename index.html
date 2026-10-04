@@ -1221,6 +1221,7 @@ function atualizarTabelaProdutos() {
       <td>${formatarMoeda(p.valor_venda)}</td>
       <td class="acoes" onclick="event.stopPropagation()">
         <button onclick="abrirFormProduto(${p.id})" title="${podeEditarProdutos ? 'Ver / Editar todos os dados' : 'Ver dados completos'}">${podeEditarProdutos ? '&#9998;' : '&#128065;'}</button>
+        <button onclick="abrirUltimoMovimentoProduto(${p.id})" title="Ver última compra, última venda e devolução ao fornecedor">&#128337;</button>
         ${podeEditarProdutos ? `
           <button onclick="clonarProduto(${p.id})" title="Clonar item">&#128203;</button>
           <button onclick="abrirMovimentoEstoque(${p.id})" title="Movimentar estoque">&#128230;</button>
@@ -1238,6 +1239,82 @@ function atualizarTabelaProdutos() {
 
 function custoRealProduto(p) {
   return (Number(p.valor_custo) || 0) + (Number(p.frete_compra) || 0) + (Number(p.outras_despesas) || 0);
+}
+
+/* Painel de "Último Movimento" de um produto: a última venda (NF do cliente, cliente e valor
+   vendido), a última compra (NF do fornecedor, fornecedor e valor de custo de entrada) e,
+   quando a compra teve devolução registrada, a devolução ao fornecedor logo abaixo dela. */
+function abrirUltimoMovimentoProduto(produtoId) {
+  const produto = loadList('produtos').find(p => p.id === produtoId);
+  if (!produto) return;
+
+  const clientes = loadList('clientes');
+  const fornecedores = loadList('fornecedores');
+
+  const vendasComItem = loadList('vendas')
+    .filter(v => (v.itens || []).some(it => it.produto_id === produtoId))
+    .map(v => ({ venda: v, item: v.itens.find(it => it.produto_id === produtoId) }))
+    .sort((a, b) => (b.venda.data_venda || '').localeCompare(a.venda.data_venda || ''));
+  const ultimaVenda = vendasComItem[0] || null;
+
+  const comprasComItem = loadList('compras')
+    .filter(c => (c.itens || []).some(it => it.produto_id === produtoId))
+    .map(c => ({ compra: c, item: c.itens.find(it => it.produto_id === produtoId) }))
+    .sort((a, b) => (b.compra.data_compra || '').localeCompare(a.compra.data_compra || ''));
+  const ultimaCompra = comprasComItem[0] || null;
+
+  let blocoVenda;
+  if (ultimaVenda) {
+    const cliente = clientes.find(c => c.id === ultimaVenda.venda.cliente_id);
+    blocoVenda = `
+      <div class="info-cliente-caixa">
+        <div><strong>NF do Cliente:</strong> ${escapeHtml(ultimaVenda.venda.numero_nf || 'Pendente de emissão')}</div>
+        <div><strong>Cliente:</strong> ${escapeHtml(cliente ? cliente.razao_social : 'Não cadastrado')}</div>
+        <div><strong>Valor Vendido:</strong> ${formatarMoeda(ultimaVenda.item.valor_unitario)}</div>
+      </div>
+    `;
+  } else {
+    blocoVenda = '<div class="aviso">Nenhuma venda registrada para este produto.</div>';
+  }
+
+  let blocoCompra;
+  let blocoDevolucao = '';
+  if (ultimaCompra) {
+    const fornecedor = fornecedores.find(f => f.id === ultimaCompra.compra.fornecedor_id);
+    blocoCompra = `
+      <div class="info-cliente-caixa">
+        <div><strong>NF do Fornecedor:</strong> ${escapeHtml(ultimaCompra.compra.numero_nf || '-')}</div>
+        <div><strong>Fornecedor:</strong> ${escapeHtml(fornecedor ? fornecedor.razao_social : 'Não cadastrado')}</div>
+        <div><strong>Valor Custo de Entrada:</strong> ${formatarMoeda(ultimaCompra.item.valor_unitario)}</div>
+      </div>
+    `;
+    if (ultimaCompra.compra.devolucao_numero_nf) {
+      blocoDevolucao = `
+        <h3 style="margin-top:16px">Devolução ao Fornecedor</h3>
+        <div class="info-cliente-caixa">
+          <div><strong>NF de Devolução:</strong> ${escapeHtml(ultimaCompra.compra.devolucao_numero_nf)}</div>
+          <div><strong>Fornecedor:</strong> ${escapeHtml(fornecedor ? fornecedor.razao_social : 'Não cadastrado')}</div>
+          <div><strong>Valor:</strong> ${formatarMoeda(ultimaCompra.compra.devolucao_valor)}</div>
+        </div>
+      `;
+    } else {
+      blocoDevolucao = '<div class="aviso" style="margin-top:12px">Sem devolução registrada para esta compra.</div>';
+    }
+  } else {
+    blocoCompra = '<div class="aviso">Nenhuma compra registrada para este produto.</div>';
+  }
+
+  abrirModal(`
+    <h2>Último Movimento — ${escapeHtml(produto.descricao)}</h2>
+    <h3>Última Venda</h3>
+    ${blocoVenda}
+    <h3 style="margin-top:16px">Última Compra</h3>
+    ${blocoCompra}
+    ${blocoDevolucao}
+    <div class="modal-botoes">
+      <button type="button" class="btn-secondary" onclick="fecharModal()">Fechar</button>
+    </div>
+  `);
 }
 
 function clonarProduto(id) {
@@ -1952,6 +2029,7 @@ function renderCompras() {
           </label>
           <button type="button" class="btn-dar-entrada" onclick="darEntradaCompra(${c.id})" title="Dar entrada: lança no estoque e em Contas a Pagar">${entradaDada ? '↻ Refazer Entrada' : '📥 Dar Entrada'}</button>
           ${entradaDada ? `<button type="button" class="btn-estornar" onclick="estornarEntradaCompra(${c.id})" title="Estorna a entrada: retira do estoque e de Contas a Pagar">↩️ Estornar Entrada</button>` : ''}
+          <button type="button" class="btn-estornar" onclick="abrirDevolucaoCompra(${c.id})" title="Registrar devolução da mercadoria ao fornecedor">${c.devolucao_numero_nf ? '↩️ Ver Devolução' : '↩️ Registrar Devolução'}</button>
           <button onclick="excluirCompra(${c.id})" title="Excluir">&#128465;</button>
         </td>
       </tr>
@@ -2094,6 +2172,65 @@ function excluirCompra(id) {
     removerContasPagarDaCompra(id);
   }
   saveList('compras', compras.filter(c => c.id !== id));
+  renderCompras();
+}
+
+/* Devolução da mercadoria desta compra ao fornecedor (nota de devolução). Guardada direto na
+   compra (numero/valor/data) — simples o bastante para a maioria dos casos, já que uma
+   devolução normalmente responde por um pedido de compra inteiro. */
+function abrirDevolucaoCompra(id) {
+  const compra = loadList('compras').find(c => c.id === id);
+  if (!compra) return;
+  const fornecedor = loadList('fornecedores').find(f => f.id === compra.fornecedor_id);
+
+  abrirModal(`
+    <h2>Devolução ao Fornecedor — Compra #${compra.id}</h2>
+    <div class="aviso">Fornecedor: <strong>${escapeHtml(fornecedor ? fornecedor.razao_social : 'Não cadastrado')}</strong> &nbsp; (NF da compra: ${escapeHtml(compra.numero_nf || '-')})</div>
+    <div class="campo">
+      <label>Número da NF de Devolução</label>
+      <input type="text" id="devolucao-numero-nf" value="${escapeHtml(compra.devolucao_numero_nf || '')}">
+    </div>
+    <div class="campo">
+      <label>Data da Devolução</label>
+      <input type="date" id="devolucao-data" value="${escapeHtml(compra.devolucao_data || new Date().toISOString().slice(0, 10))}">
+    </div>
+    <div class="campo">
+      <label>Valor Devolvido</label>
+      <input type="text" id="devolucao-valor" value="${(Number(compra.devolucao_valor) || 0).toFixed(2).replace('.', ',')}">
+    </div>
+    <div class="modal-botoes">
+      <button type="button" class="btn-primary" onclick="confirmarDevolucaoCompra(${compra.id})">Salvar</button>
+      ${compra.devolucao_numero_nf ? `<button type="button" class="btn-perigo" onclick="removerDevolucaoCompra(${compra.id})">Remover Devolução</button>` : ''}
+      <button type="button" class="btn-secondary" onclick="fecharModal()">Cancelar</button>
+    </div>
+  `);
+}
+
+function confirmarDevolucaoCompra(id) {
+  const compras = loadList('compras');
+  const idx = compras.findIndex(c => c.id === id);
+  if (idx === -1) return;
+  const numeroNf = document.getElementById('devolucao-numero-nf').value.trim();
+  const data = document.getElementById('devolucao-data').value;
+  const valor = numeroBr(document.getElementById('devolucao-valor').value);
+  if (!numeroNf) {
+    alert('Informe o número da NF de devolução.');
+    return;
+  }
+  compras[idx] = { ...compras[idx], devolucao_numero_nf: numeroNf, devolucao_data: data, devolucao_valor: valor };
+  saveList('compras', compras);
+  fecharModal();
+  renderCompras();
+}
+
+function removerDevolucaoCompra(id) {
+  if (!confirm('Remover o registro de devolução desta compra?')) return;
+  const compras = loadList('compras');
+  const idx = compras.findIndex(c => c.id === id);
+  if (idx === -1) return;
+  compras[idx] = { ...compras[idx], devolucao_numero_nf: '', devolucao_data: '', devolucao_valor: 0 };
+  saveList('compras', compras);
+  fecharModal();
   renderCompras();
 }
 
