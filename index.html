@@ -108,7 +108,7 @@
   .vazio { text-align: center; color: var(--texto-suave); padding: 20px; }
   .texto-suave-pequeno { color: var(--texto-suave); font-size: 12px; }
 
-  .modal-overlay { position: fixed; inset: 0; background: rgba(20,30,20,0.45); display: none; align-items: center; justify-content: center; z-index: 1000; padding: 20px; }
+  .modal-overlay { position: fixed; inset: 0; background: rgba(20,30,20,0.45); display: none; align-items: center; justify-content: center; z-index: 3100; padding: 20px; }
   .modal { background: #FFFFFF; border: 1px solid var(--borda); box-shadow: 0 10px 40px rgba(0,0,0,0.18); border-radius: 16px; padding: 26px; width: 100%; max-width: 560px; max-height: 88vh; overflow-y: auto; color: var(--texto); }
   .modal h2 { color: var(--accent-2); margin-top: 0; }
   .modal.modal-largo { max-width: 920px; }
@@ -130,6 +130,10 @@
   .login-erro { color: var(--perigo); font-size: 13px; min-height: 18px; margin: 4px 0 8px; text-align: center; }
   .login-botao { width: 100%; margin-top: 6px; }
   .login-dica { margin-top: 16px; font-size: 11.5px; color: var(--texto-suave); text-align: center; }
+  .login-dica:hover { text-decoration: underline; color: var(--accent); }
+
+  .tela-painel-admin { position: fixed; inset: 0; z-index: 2200; background: linear-gradient(135deg, #F2F7F2, #FFFFFF); overflow: auto; padding: 28px 20px; }
+  .painel-admin-caixa { max-width: 1000px; margin: 0 auto; }
 
   .sidebar-usuario-info { margin-top: auto; padding-top: 14px; border-top: 1px solid var(--borda); font-size: 12.5px; }
   .sidebar-usuario-info .usuario-nome { color: var(--texto); font-weight: 600; margin-bottom: 2px; }
@@ -309,6 +313,21 @@
   <div class="texto">Sincronizando dados...</div>
 </div>
 
+<div id="tela-ativacao" class="tela-login" style="display:none">
+  <form class="login-card" onsubmit="return tentarAtivacao(event)">
+    <div class="login-logo">PAP<span>TECH</span></div>
+    <p class="login-subtitulo">Digite o código de ativação do sistema</p>
+    <div class="campo">
+      <label>Código de Ativação</label>
+      <input type="text" id="ativacao-codigo" autocomplete="off" required>
+    </div>
+    <div id="ativacao-erro" class="login-erro"></div>
+    <button type="submit" class="btn-primary login-botao">Ativar</button>
+  </form>
+</div>
+
+<div id="tela-painel-admin" class="tela-painel-admin" style="display:none"></div>
+
 <div id="tela-login" class="tela-login" style="display:none">
   <form class="login-card" onsubmit="return tentarLogin(event)">
     <div class="login-logo">PAP<span>TECH</span></div>
@@ -323,6 +342,7 @@
     </div>
     <div id="login-erro" class="login-erro"></div>
     <button type="submit" class="btn-primary login-botao">Entrar</button>
+    <p class="login-dica" style="cursor:pointer" onclick="sairDaLicenca()">Trocar código de ativação</p>
   </form>
 </div>
 
@@ -423,6 +443,27 @@ const SECOES_PERMISSAO = [
 const SECOES_GRANULARES = ['produtos', 'clientes', 'fornecedores'];
 const CHAVE_SESSAO_USUARIO = 'westech_sessao_usuario_id';
 
+/* ---------- licenciamento (multiempresa) ---------- */
+/* O sistema é vendido para vários clientes, todos usando o mesmo link e o mesmo banco
+   Supabase — então cada cliente precisa de um "código de ativação" próprio, que separa
+   os dados dele dos demais (campo "licenca" nas tabelas da nuvem e nas chaves locais).
+   Sem um código de ativação válido, o sistema nem chega a mostrar a tela de login. */
+const CHAVE_LICENCA = 'westech_licenca_codigo';
+/* Código especial que abre o Painel de Controle (gerenciar clientes) em vez de ativar
+   um cliente comum. Troque por outro valor seu — como este arquivo é público no GitHub,
+   qualquer pessoa pode ver este código olhando o código-fonte, então ele funciona mais
+   como uma "porta dos fundos" prática do que como segurança forte. */
+const CODIGO_MASTER_ADMIN = 'PAPTECH-MASTER-7F3K9X';
+let licencaAtual = localStorage.getItem(CHAVE_LICENCA) || null;
+
+function chaveLocalComLicenca(chave) {
+  return STORAGE_KEYS[chave] + '::' + (licencaAtual || 'sem_licenca');
+}
+
+function chaveSessaoAtual() {
+  return CHAVE_SESSAO_USUARIO + '::' + (licencaAtual || 'sem_licenca');
+}
+
 /* ---------- banco de dados online (Supabase) ---------- */
 /* Preencha estes dois valores com os dados do seu projeto Supabase
    (Project Settings -> API: "Project URL" e a chave "anon public").
@@ -468,12 +509,12 @@ function atualizarSistema() {
    local com o que estiver lá — a nuvem passa a ser a fonte da verdade.
    Chamado uma vez, ao abrir a página, antes de decidir login/painel. */
 async function sincronizarComNuvem() {
-  if (!nuvemConfigurada()) {
+  if (!nuvemConfigurada() || !licencaAtual) {
     atualizarIndicadorSync('off');
     return;
   }
   try {
-    const { data, error } = await supabaseClient.from('registros').select('colecao, dados');
+    const { data, error } = await supabaseClient.from('registros').select('colecao, dados').eq('licenca', licencaAtual);
     if (error) throw error;
 
     const porColecao = {};
@@ -482,7 +523,7 @@ async function sincronizarComNuvem() {
       if (porColecao[linha.colecao]) porColecao[linha.colecao].push(linha.dados);
     });
     Object.keys(porColecao).forEach(chave => {
-      localStorage.setItem(STORAGE_KEYS[chave], JSON.stringify(porColecao[chave]));
+      localStorage.setItem(chaveLocalComLicenca(chave), JSON.stringify(porColecao[chave]));
     });
     atualizarIndicadorSync('ok');
   } catch (erro) {
@@ -495,25 +536,28 @@ async function sincronizarComNuvem() {
    e apaga da nuvem qualquer item que não esteja mais nela (mesmo padrão de
    "substituir o array inteiro" que o resto do app já usa). Roda em segundo
    plano, sem travar a tela — se falhar, só avisa, não desfaz o salvamento
-   local (que já aconteceu antes desta chamada). */
+   local (que já aconteceu antes desta chamada). Toda linha leva a "licenca" do
+   cliente atual, para os dados de um cliente nunca se misturarem com os de outro
+   dentro do mesmo banco Supabase. */
 async function enviarParaNuvem(chave, lista) {
-  if (!nuvemConfigurada()) return;
+  if (!nuvemConfigurada() || !licencaAtual) return;
   try {
     const linhas = lista.filter(item => item && item.id != null).map(item => ({
       colecao: chave,
       registro_id: item.id,
       dados: item,
+      licenca: licencaAtual,
     }));
 
     if (linhas.length) {
       const { error: erroUpsert } = await supabaseClient
         .from('registros')
-        .upsert(linhas, { onConflict: 'colecao,registro_id' });
+        .upsert(linhas, { onConflict: 'licenca,colecao,registro_id' });
       if (erroUpsert) throw erroUpsert;
     }
 
     const idsAtuais = lista.map(item => item.id).filter(id => id != null);
-    let queryDelete = supabaseClient.from('registros').delete().eq('colecao', chave);
+    let queryDelete = supabaseClient.from('registros').delete().eq('colecao', chave).eq('licenca', licencaAtual);
     queryDelete = idsAtuais.length ? queryDelete.not('registro_id', 'in', `(${idsAtuais.join(',')})` ) : queryDelete;
     const { error: erroDelete } = await queryDelete;
     if (erroDelete) throw erroDelete;
@@ -540,14 +584,14 @@ let relatorioContasTemp = { receber: null, pagar: null };
 
 function loadList(chave) {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEYS[chave]) || '[]');
+    return JSON.parse(localStorage.getItem(chaveLocalComLicenca(chave)) || '[]');
   } catch (e) {
     return [];
   }
 }
 
 function saveList(chave, lista) {
-  localStorage.setItem(STORAGE_KEYS[chave], JSON.stringify(lista));
+  localStorage.setItem(chaveLocalComLicenca(chave), JSON.stringify(lista));
   // Envia para a nuvem em segundo plano (não espera/bloqueia a tela).
   enviarParaNuvem(chave, lista);
 }
@@ -694,7 +738,7 @@ function inicializarUsuariosPadrao() {
 }
 
 function usuarioLogado() {
-  const id = Number(localStorage.getItem(CHAVE_SESSAO_USUARIO));
+  const id = Number(localStorage.getItem(chaveSessaoAtual()));
   if (!id) return null;
   const usuario = loadList('usuarios').find(u => u.id === id);
   if (!usuario || usuario.status === 'Inativo') return null;
@@ -735,8 +779,251 @@ function podeEmitirNf() {
   return !!(usuario.permissoes && usuario.permissoes.emitir_nf);
 }
 
+/* ---------- ativação / licença do cliente / painel do administrador ---------- */
+
+function mostrarTelaAtivacao(mensagemErro) {
+  document.getElementById('app-principal').style.display = 'none';
+  document.getElementById('tela-login').style.display = 'none';
+  document.getElementById('tela-painel-admin').style.display = 'none';
+  const tela = document.getElementById('tela-ativacao');
+  tela.style.display = 'flex';
+  document.getElementById('ativacao-erro').textContent = mensagemErro || '';
+  const campo = document.getElementById('ativacao-codigo');
+  campo.value = '';
+  setTimeout(() => campo.focus(), 50);
+}
+
+function ocultarTelaAtivacao() {
+  document.getElementById('tela-ativacao').style.display = 'none';
+}
+
+/* Confere se uma licença (código já ativado neste navegador) ainda está liberada.
+   Retorna 'ok' (libera e já atualiza "último acesso"), 'bloqueada' (código bloqueado
+   ou excluído — nega o acesso), ou 'sem_conexao' (não foi possível confirmar agora —
+   nesse caso o sistema segue com os dados locais já salvos, sem travar o usuário por
+   uma falha de internet). */
+async function consultarSituacaoLicenca(codigo) {
+  if (!nuvemConfigurada()) return 'sem_conexao';
+  try {
+    const { data, error } = await supabaseClient.from('licencas').select('ativo').eq('codigo', codigo).maybeSingle();
+    if (error) throw error;
+    if (!data || !data.ativo) return 'bloqueada';
+    supabaseClient.from('licencas').update({ ultimo_acesso: new Date().toISOString() }).eq('codigo', codigo).then(() => {}, () => {});
+    return 'ok';
+  } catch (erro) {
+    console.warn('Não foi possível confirmar a situação da licença agora:', erro);
+    return 'sem_conexao';
+  }
+}
+
+async function tentarAtivacao(event) {
+  event.preventDefault();
+  const codigoDigitado = document.getElementById('ativacao-codigo').value.trim();
+  const erroEl = document.getElementById('ativacao-erro');
+  erroEl.textContent = '';
+  if (!codigoDigitado) return false;
+
+  if (codigoDigitado === CODIGO_MASTER_ADMIN) {
+    ocultarTelaAtivacao();
+    abrirPainelAdmin();
+    return false;
+  }
+
+  if (!nuvemConfigurada()) {
+    erroEl.textContent = 'A ativação precisa de conexão com a internet na primeira vez. Verifique sua conexão e tente de novo.';
+    return false;
+  }
+
+  erroEl.textContent = 'Verificando código...';
+  try {
+    const { data, error } = await supabaseClient.from('licencas').select('*').eq('codigo', codigoDigitado).maybeSingle();
+    if (error) throw error;
+    if (!data) {
+      erroEl.textContent = 'Código de ativação não encontrado.';
+      return false;
+    }
+    if (!data.ativo) {
+      erroEl.textContent = 'Este código está bloqueado. Fale com o fornecedor do sistema.';
+      return false;
+    }
+
+    licencaAtual = codigoDigitado;
+    localStorage.setItem(CHAVE_LICENCA, codigoDigitado);
+    supabaseClient.from('licencas').update({ ultimo_acesso: new Date().toISOString() }).eq('codigo', codigoDigitado).then(() => {}, () => {});
+
+    ocultarTelaAtivacao();
+    document.getElementById('tela-carregando').style.display = 'flex';
+    await sincronizarComNuvem();
+    document.getElementById('tela-carregando').style.display = 'none';
+    inicializarUsuariosPadrao();
+    mostrarTelaLogin();
+  } catch (erro) {
+    erroEl.textContent = 'Não foi possível verificar o código agora. Verifique sua conexão e tente de novo.';
+  }
+  return false;
+}
+
+/* Sai da licença atual neste navegador (os dados do cliente continuam salvos na
+   nuvem — isso só esquece o código aqui, pra poder digitar outro ou o master). */
+function sairDaLicenca() {
+  if (!confirm('Isso vai sair do código de ativação atual neste navegador (os dados continuam salvos na nuvem). Deseja continuar?')) return;
+  localStorage.removeItem(CHAVE_LICENCA);
+  window.location.reload();
+}
+
+/* ---------- Painel de Controle (gerenciar os clientes/licenças) ---------- */
+
+async function abrirPainelAdmin() {
+  document.getElementById('tela-carregando').style.display = 'flex';
+  document.getElementById('tela-painel-admin').style.display = 'block';
+  await renderPainelAdmin();
+  document.getElementById('tela-carregando').style.display = 'none';
+}
+
+async function renderPainelAdmin() {
+  const container = document.getElementById('tela-painel-admin');
+  if (!nuvemConfigurada()) {
+    container.innerHTML = `
+      <div class="painel-admin-caixa">
+        <div class="aviso">A nuvem (Supabase) não está configurada neste arquivo — o Painel de Controle precisa dela para listar/criar clientes.</div>
+        <button class="btn-secondary" onclick="fecharPainelAdmin()">Voltar</button>
+      </div>
+    `;
+    return;
+  }
+
+  let licencas = [];
+  try {
+    const { data, error } = await supabaseClient.from('licencas').select('*').order('criado_em', { ascending: false });
+    if (error) throw error;
+    licencas = data || [];
+  } catch (erro) {
+    container.innerHTML = `
+      <div class="painel-admin-caixa">
+        <div class="aviso">Não foi possível carregar os clientes agora: ${escapeHtml(erro.message || String(erro))}</div>
+        <button class="btn-secondary" onclick="fecharPainelAdmin()">Voltar</button>
+      </div>
+    `;
+    return;
+  }
+
+  const linhas = licencas.map(l => `
+    <tr>
+      <td>${escapeHtml(l.cliente_nome || '-')}</td>
+      <td><code>${escapeHtml(l.codigo)}</code></td>
+      <td><span class="status-badge ${l.ativo ? 'status-pago' : 'status-vencido'}">${l.ativo ? 'Ativo' : 'Bloqueado'}</span></td>
+      <td>${l.criado_em ? formatarDataBr(String(l.criado_em).slice(0, 10)) : '-'}</td>
+      <td>${l.ultimo_acesso ? formatarDataBr(String(l.ultimo_acesso).slice(0, 10)) : 'Nunca acessou'}</td>
+      <td class="acoes">
+        <button type="button" onclick="alternarLicenca('${escapeHtml(l.codigo)}', ${l.ativo ? 'false' : 'true'})">${l.ativo ? '🔒 Bloquear' : '🔓 Liberar'}</button>
+        <button type="button" onclick="copiarCodigoLicenca('${escapeHtml(l.codigo)}')" title="Copiar código">📋 Copiar</button>
+        <button type="button" onclick="excluirLicenca('${escapeHtml(l.codigo)}')" title="Excluir cliente/licença">&#128465;</button>
+      </td>
+    </tr>
+  `).join('');
+
+  container.innerHTML = `
+    <div class="painel-admin-caixa">
+      <div class="section-header">
+        <h1>Painel de Controle — Clientes PAPTECH</h1>
+        <div class="header-botoes">
+          <button class="btn-primary" onclick="abrirNovaLicenca()">+ Novo Cliente</button>
+          <button class="btn-secondary" onclick="fecharPainelAdmin()">Sair do Painel</button>
+        </div>
+      </div>
+      <div class="aviso">Entregue o "Código de Ativação" pro cliente — ele digita isso uma vez, na primeira tela que o sistema mostra. A partir daí, os dados dele ficam isolados dos de outros clientes.</div>
+      <table class="data-table">
+        <thead><tr><th>Cliente</th><th>Código de Ativação</th><th>Situação</th><th>Criado em</th><th>Último acesso</th><th></th></tr></thead>
+        <tbody>${linhas || '<tr><td colspan="6" class="vazio">Nenhum cliente cadastrado ainda.</td></tr>'}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function fecharPainelAdmin() {
+  document.getElementById('tela-painel-admin').style.display = 'none';
+  mostrarTelaAtivacao();
+}
+
+function abrirNovaLicenca() {
+  abrirModal(`
+    <h2>Novo Cliente</h2>
+    <div class="campo">
+      <label>Nome do Cliente</label>
+      <input type="text" id="novo-cliente-nome" placeholder="Ex: Auto Peças Silva">
+    </div>
+    <div class="modal-botoes">
+      <button type="button" class="btn-primary" onclick="confirmarNovaLicenca()">Gerar Código</button>
+      <button type="button" class="btn-secondary" onclick="fecharModal()">Cancelar</button>
+    </div>
+  `);
+}
+
+/* Código curto, sem letras/números fáceis de confundir (sem O/0/I/1), em dois
+   blocos de 5 (ex: "7KPX9-M3QRT") pra ficar fácil de ler e digitar por telefone. */
+function gerarCodigoLicenca() {
+  const caracteres = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let codigo = '';
+  for (let i = 0; i < 10; i++) codigo += caracteres[Math.floor(Math.random() * caracteres.length)];
+  return codigo.slice(0, 5) + '-' + codigo.slice(5);
+}
+
+async function confirmarNovaLicenca() {
+  const nome = document.getElementById('novo-cliente-nome').value.trim();
+  if (!nome) {
+    alert('Informe o nome do cliente.');
+    return;
+  }
+  const codigo = gerarCodigoLicenca();
+  try {
+    const { error } = await supabaseClient.from('licencas').insert({ codigo, cliente_nome: nome, ativo: true });
+    if (error) throw error;
+    fecharModal();
+    await renderPainelAdmin();
+    alert(`Cliente "${nome}" cadastrado!\n\nCódigo de ativação: ${codigo}\n\nEntregue esse código pro cliente — ele digita na primeira vez que abrir o sistema.`);
+  } catch (erro) {
+    alert('Não foi possível criar o cliente: ' + (erro.message || String(erro)));
+  }
+}
+
+async function alternarLicenca(codigo, novoAtivoTexto) {
+  const novoAtivo = novoAtivoTexto === 'true';
+  if (!novoAtivo && !confirm('Bloquear o acesso deste cliente? Na próxima vez que ele abrir o sistema (ou sincronizar), o acesso será negado.')) return;
+  try {
+    const { error } = await supabaseClient.from('licencas').update({ ativo: novoAtivo }).eq('codigo', codigo);
+    if (error) throw error;
+    await renderPainelAdmin();
+  } catch (erro) {
+    alert('Não foi possível atualizar: ' + (erro.message || String(erro)));
+  }
+}
+
+function copiarCodigoLicenca(codigo) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(codigo).then(
+      () => alert('Código copiado: ' + codigo),
+      () => alert('Código: ' + codigo)
+    );
+  } else {
+    alert('Código: ' + codigo);
+  }
+}
+
+async function excluirLicenca(codigo) {
+  if (!confirm('Excluir este cliente/licença? Isso impede o acesso com esse código (ele deixa de existir), mas NÃO apaga os dados já salvos na nuvem.')) return;
+  try {
+    const { error } = await supabaseClient.from('licencas').delete().eq('codigo', codigo);
+    if (error) throw error;
+    await renderPainelAdmin();
+  } catch (erro) {
+    alert('Não foi possível excluir: ' + (erro.message || String(erro)));
+  }
+}
+
 function mostrarTelaLogin(mensagemErro) {
   document.getElementById('app-principal').style.display = 'none';
+  document.getElementById('tela-ativacao').style.display = 'none';
+  document.getElementById('tela-painel-admin').style.display = 'none';
   const tela = document.getElementById('tela-login');
   tela.style.display = 'flex';
   document.getElementById('login-erro').textContent = mensagemErro || '';
@@ -767,14 +1054,14 @@ function tentarLogin(event) {
     return false;
   }
 
-  localStorage.setItem(CHAVE_SESSAO_USUARIO, String(usuario.id));
+  localStorage.setItem(chaveSessaoAtual(), String(usuario.id));
   ocultarTelaLogin();
   iniciarAppLogado();
   return false;
 }
 
 function fazerLogout() {
-  localStorage.removeItem(CHAVE_SESSAO_USUARIO);
+  localStorage.removeItem(chaveSessaoAtual());
   mostrarTelaLogin();
 }
 
@@ -6556,6 +6843,22 @@ function renderDashboard() {
 /* ---------- inicializacao ---------- */
 
 window.addEventListener('DOMContentLoaded', async () => {
+  // Sem código de ativação salvo neste navegador: pede antes de mostrar qualquer outra tela.
+  if (!licencaAtual) {
+    document.getElementById('tela-carregando').style.display = 'none';
+    mostrarTelaAtivacao();
+    return;
+  }
+
+  // Já tem um código salvo: confirma que ele ainda está liberado antes de seguir.
+  // "sem_conexao" não bloqueia (segue com os dados locais) — só "bloqueada" bloqueia de fato.
+  const situacaoLicenca = await consultarSituacaoLicenca(licencaAtual);
+  if (situacaoLicenca === 'bloqueada') {
+    document.getElementById('tela-carregando').style.display = 'none';
+    mostrarTelaAtivacao('Este código de ativação está bloqueado ou não existe mais. Fale com o fornecedor do sistema.');
+    return;
+  }
+
   await sincronizarComNuvem();
   document.getElementById('tela-carregando').style.display = 'none';
 
