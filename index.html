@@ -663,6 +663,7 @@ function permissoesTotais() {
   SECOES_PERMISSAO.forEach(([chave]) => {
     permissoes[chave] = SECOES_GRANULARES.includes(chave) ? 'cadastrar' : true;
   });
+  permissoes.emitir_nf = true;
   return permissoes;
 }
 
@@ -671,6 +672,7 @@ function permissoesVazias() {
   SECOES_PERMISSAO.forEach(([chave]) => {
     permissoes[chave] = SECOES_GRANULARES.includes(chave) ? 'nenhum' : false;
   });
+  permissoes.emitir_nf = false;
   return permissoes;
 }
 
@@ -721,6 +723,16 @@ function podeCadastrar(secao) {
   if (!SECOES_GRANULARES.includes(secao)) return temPermissao(secao);
   const valor = usuario.permissoes && usuario.permissoes[secao];
   return valor === 'cadastrar' || valor === true;
+}
+
+/* Permissão específica (não ligada a uma tela): pode marcar uma venda como Nota Fiscal
+   emitida/cancelada (botão "Emitir NFe" em Vendas). Separada do acesso à tela "Notas
+   Fiscais" — um usuário pode ver as notas já emitidas sem poder emitir novas, ou vice-versa. */
+function podeEmitirNf() {
+  const usuario = usuarioLogado();
+  if (!usuario) return false;
+  if (usuario.nivel === 'Administrador') return true;
+  return !!(usuario.permissoes && usuario.permissoes.emitir_nf);
 }
 
 function mostrarTelaLogin(mensagemErro) {
@@ -2777,7 +2789,7 @@ function renderVendas() {
           <button onclick="verItensVenda(${v.id})" title="Ver itens">&#128065;</button>
           <button onclick="imprimirVenda(${v.id})" title="Imprimir">&#128424;</button>
           <button onclick="abrirFormVendaManual(${v.id})" title="Alterar">&#9998;</button>
-          <button type="button" class="btn-emitir-nfe" onclick="abrirEmitirNfeVenda(${v.id})" title="Emitir a NF-e desta venda (ou ver a nota já emitida)">🧾 ${v.status_nf === 'Emitida' || v.status_nf === 'Cancelada' ? 'Ver NF-e' : 'Emitir NFe'}</button>
+          ${(podeEmitirNf() || v.status_nf === 'Emitida' || v.status_nf === 'Cancelada') ? `<button type="button" class="btn-emitir-nfe" onclick="abrirEmitirNfeVenda(${v.id})" title="Emitir a NF-e desta venda (ou ver a nota já emitida)">🧾 ${v.status_nf === 'Emitida' || v.status_nf === 'Cancelada' ? 'Ver NF-e' : 'Emitir NFe'}</button>` : ''}
           <button type="button" class="btn-gerar-recebimento" onclick="abrirGerarRecebimentoVenda(${v.id})" title="Lança em Contas a Receber e dá saída no estoque">${recebimentoGerado ? '↻ Refazer Recebimento' : '💰 Gerar Recebimento'}</button>
           ${recebimentoGerado ? `<button type="button" class="btn-estornar" onclick="estornarRecebimentoVenda(${v.id})" title="Estorna o recebimento: retira de Contas a Receber e devolve o estoque">↩️ Estornar Recebimento</button>` : ''}
           <button onclick="excluirVenda(${v.id})" title="Excluir">&#128465;</button>
@@ -3471,6 +3483,11 @@ function abrirEmitirNfeVenda(vendaId) {
     return;
   }
 
+  if (!podeEmitirNf()) {
+    alert('Você não tem permissão para emitir Nota Fiscal.');
+    return;
+  }
+
   const cfg = configNfe();
   const configurada = nfeConfigurada();
   const indicadorIeInicial = montarNfeVenda(venda, { prazos: venda.prazos_pagamento }).resumo.indicadorIe;
@@ -3731,7 +3748,7 @@ function abrirGerenciarNfeVenda(vendaId, mensagemTopo) {
       ${venda.nfe_caminho_xml_cancelamento ? `<button type="button" class="btn-secondary" onclick="abrirArquivoNfe(${venda.id}, 'cancelamento')">XML do cancelamento</button>` : ''}
       <button type="button" class="btn-secondary" onclick="consultarNfeVenda(${venda.id})">🔄 Consultar na SEFAZ</button>
       ${autorizada ? `<button type="button" class="btn-secondary" onclick="abrirCartaCorrecaoNfe(${venda.id})">✏️ Carta de Correção</button>` : ''}
-      ${autorizada ? `<button type="button" class="btn-perigo" onclick="abrirCancelarNfe(${venda.id})">Cancelar NF-e</button>` : ''}
+      ${(autorizada && podeEmitirNf()) ? `<button type="button" class="btn-perigo" onclick="abrirCancelarNfe(${venda.id})">Cancelar NF-e</button>` : ''}
       <button type="button" class="btn-secondary" onclick="fecharModal()">Fechar</button>
     </div>
   `);
@@ -3763,6 +3780,10 @@ async function consultarNfeVenda(vendaId) {
 function abrirCancelarNfe(vendaId) {
   const venda = loadList('vendas').find(v => v.id === vendaId);
   if (!venda) return;
+  if (!podeEmitirNf()) {
+    alert('Você não tem permissão para emitir/cancelar Nota Fiscal.');
+    return;
+  }
   abrirModal(`
     <h2>Cancelar NF-e nº ${escapeHtml(venda.numero_nf || '')} — Venda #${venda.id}</h2>
     <div class="aviso">O cancelamento é enviado para a SEFAZ e não pode ser desfeito. Na maioria dos estados o prazo é de até 24 horas após a autorização.</div>
@@ -3785,6 +3806,10 @@ function abrirCancelarNfe(vendaId) {
 async function confirmarCancelarNfe(vendaId) {
   const venda = loadList('vendas').find(v => v.id === vendaId);
   if (!venda) return;
+  if (!podeEmitirNf()) {
+    alert('Você não tem permissão para emitir/cancelar Nota Fiscal.');
+    return;
+  }
   const justificativa = document.getElementById('nfe-cancelar-justificativa').value.trim();
   if (justificativa.length < 15) {
     alert('A justificativa precisa ter pelo menos 15 caracteres.');
@@ -4021,6 +4046,10 @@ async function testarConexaoNfe() {
 function abrirRegistroManualNfeVenda(vendaId) {
   const venda = loadList('vendas').find(v => v.id === vendaId);
   if (!venda) return;
+  if (!podeEmitirNf()) {
+    alert('Você não tem permissão para emitir/cancelar Nota Fiscal.');
+    return;
+  }
 
   abrirModal(`
     <h2>Emitir Nota Fiscal — Venda #${venda.id}</h2>
@@ -4063,6 +4092,10 @@ function abrirRegistroManualNfeVenda(vendaId) {
 }
 
 function confirmarEmitirNfeVenda(vendaId) {
+  if (!podeEmitirNf()) {
+    alert('Você não tem permissão para emitir/cancelar Nota Fiscal.');
+    return;
+  }
   const vendas = loadList('vendas');
   const idx = vendas.findIndex(v => v.id === vendaId);
   if (idx === -1) return;
@@ -5681,6 +5714,13 @@ function abrirFormUsuario(id) {
       <label style="font-size:12.5px;color:var(--texto-suave)">Áreas liberadas para este usuário</label>
       <div id="aviso-permissao-admin" class="aviso" style="margin:6px 0; ${ehAdminRegistro ? '' : 'display:none'}">Administrador tem acesso liberado a todas as áreas automaticamente.</div>
       <div class="permissoes-grade">${camposPermissao}</div>
+      <label style="font-size:12.5px;color:var(--texto-suave); margin-top:10px; display:block">Permissões especiais</label>
+      <div class="permissoes-grade">
+        <label class="permissao-item">
+          <input type="checkbox" class="checkbox-permissao-usuario" value="emitir_nf" ${permissoesAtuais.emitir_nf ? 'checked' : ''} ${ehAdminRegistro ? 'disabled' : ''}>
+          Pode emitir/cancelar Nota Fiscal (botão "Emitir NFe" em Vendas)
+        </label>
+      </div>
       <div class="modal-botoes">
         <button type="submit" class="btn-primary">Salvar</button>
         <button type="button" class="btn-secondary" onclick="fecharModal()">Cancelar</button>
