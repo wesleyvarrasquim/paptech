@@ -1,0 +1,6 @@
+{
+  "PAPTECH_CHAVE_NFE": "invente-uma-senha-forte-aqui",
+  "FOCUS_TOKEN_HOMOLOGACAO": "cole-aqui-o-token-de-homologacao",
+  "FOCUS_TOKEN_PRODUCAO": "cole-aqui-o-token-de-producao",
+  "PORTA": "8787"
+}

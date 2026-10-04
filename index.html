@@ -185,6 +185,21 @@
   .item-linha select { flex: 2; min-width: 150px; }
   .item-linha input { flex: 1; min-width: 80px; }
 
+  .nfe-ambiente { display: inline-block; font-size: 12px; font-weight: 800; padding: 4px 10px; border-radius: 999px; letter-spacing: 0.02em; }
+  .nfe-ambiente-homologacao { background: #E3F2FD; color: #0D47A1; border: 1px solid #90CAF9; }
+  .nfe-ambiente-producao { background: #FDECEA; color: #B71C1C; border: 1px solid #EF9A9A; }
+  .nfe-erros { background: #FDECEA; border: 1px solid #EF9A9A; color: #8E1B1B; padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 14px; }
+  .nfe-erros ul { margin: 6px 0 0; padding-left: 18px; }
+  .nfe-totais { font-size: 13px; margin: 8px 0 14px; color: #333; }
+  .nfe-status { padding: 10px 14px; border-radius: 8px; font-size: 13px; margin: 10px 0; line-height: 1.5; }
+  .nfe-status-info { background: #E3F2FD; color: #0D47A1; border: 1px solid #90CAF9; }
+  .nfe-status-ok { background: #E8F5E9; color: #1B5E20; border: 1px solid #A5D6A7; }
+  .nfe-status-erro { background: #FDECEA; color: #8E1B1B; border: 1px solid #EF9A9A; }
+  .nfe-chave { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; }
+  .nfe-botoes { flex-wrap: wrap; }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-perigo { background: #C62828; color: #fff; border: none; padding: 11px 20px; border-radius: 12px; font-weight: 800; cursor: pointer; }
+  .btn-perigo:disabled { opacity: 0.5; cursor: not-allowed; }
   .aviso { background: #FFF6DE; border: 1px solid #EBCB78; color: #7A5B00; padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; }
   .certificado-a1-caixa { background: var(--painel); border: 1px solid var(--borda); border-radius: 10px; padding: 14px 18px; font-size: 13.5px; }
   .certificado-a1-caixa p { margin: 0 0 8px; }
@@ -1058,6 +1073,17 @@ const CAMPOS_PRODUTO_IMPOSTOS = [
   ['ncm', 'NCM'],
   ['cfop', 'CFOP'],
   ['cst_csosn', 'CST / CSOSN'],
+  ['origem', 'Origem da Mercadoria (NF-e)', 'select', [
+    '0 - Nacional',
+    '1 - Estrangeira (importação direta)',
+    '2 - Estrangeira (adquirida no mercado interno)',
+    '3 - Nacional, conteúdo de importação > 40% e <= 70%',
+    '4 - Nacional, processos produtivos básicos',
+    '5 - Nacional, conteúdo de importação <= 40%',
+    '6 - Estrangeira (importação direta, sem similar nacional)',
+    '7 - Estrangeira (mercado interno, sem similar nacional)',
+    '8 - Nacional, conteúdo de importação > 70%',
+  ]],
   ['aliquota_icms', 'Alíquota ICMS (%)'],
   ['aliquota_ipi', 'Alíquota IPI (%)'],
   ['aliquota_pis', 'Alíquota PIS (%)'],
@@ -2751,7 +2777,7 @@ function renderVendas() {
           <button onclick="verItensVenda(${v.id})" title="Ver itens">&#128065;</button>
           <button onclick="imprimirVenda(${v.id})" title="Imprimir">&#128424;</button>
           <button onclick="abrirFormVendaManual(${v.id})" title="Alterar">&#9998;</button>
-          <button type="button" class="btn-emitir-nfe" onclick="abrirEmitirNfeVenda(${v.id})" title="Preencher/emitir a Nota Fiscal desta venda">🧾 Emitir NFe</button>
+          <button type="button" class="btn-emitir-nfe" onclick="abrirEmitirNfeVenda(${v.id})" title="Emitir a NF-e desta venda (ou ver a nota já emitida)">🧾 ${v.status_nf === 'Emitida' || v.status_nf === 'Cancelada' ? 'Ver NF-e' : 'Emitir NFe'}</button>
           <button type="button" class="btn-gerar-recebimento" onclick="abrirGerarRecebimentoVenda(${v.id})" title="Lança em Contas a Receber e dá saída no estoque">${recebimentoGerado ? '↻ Refazer Recebimento' : '💰 Gerar Recebimento'}</button>
           ${recebimentoGerado ? `<button type="button" class="btn-estornar" onclick="estornarRecebimentoVenda(${v.id})" title="Estorna o recebimento: retira de Contas a Receber e devolve o estoque">↩️ Estornar Recebimento</button>` : ''}
           <button onclick="excluirVenda(${v.id})" title="Excluir">&#128465;</button>
@@ -2768,7 +2794,7 @@ function renderVendas() {
         <button class="btn-primary" onclick="abrirFormVendaManual()">+ Nova Venda</button>
       </div>
     </div>
-    <div class="aviso">Gerar uma venda só cria o pedido. Para dar saída no estoque e lançar em Contas a Receber, use "Emitir NFe" (marcando a nota como Emitida) ou "Gerar Recebimento".</div>
+    <div class="aviso">Gerar uma venda só cria o pedido. Para dar saída no estoque e lançar em Contas a Receber, use "Emitir NFe" (quando a nota é autorizada pela SEFAZ) ou "Gerar Recebimento".</div>
     <table class="data-table">
       <thead><tr><th>Cliente</th><th>Número</th><th>Data</th><th>Vendedor</th><th>Valor Total</th><th>Nota Fiscal</th><th>Recebimento</th><th></th></tr></thead>
       <tbody>${linhas || `<tr><td colspan="8" class="vazio">Nenhuma venda lançada.</td></tr>`}</tbody>
@@ -2779,8 +2805,10 @@ function renderVendas() {
 /* Monta o selo de status da Nota Fiscal de uma venda (Emitida / Pendente / Cancelada),
    junto com o número da NF quando já estiver preenchido. */
 function badgeStatusNfVenda(venda) {
-  const status = venda.status_nf || 'Pendente';
-  const classePorStatus = { Emitida: 'status-pago', Pendente: 'status-pendente', Cancelada: 'status-vencido' };
+  let status = venda.status_nf || 'Pendente';
+  if (status === 'Pendente' && venda.nfe_status_api === 'processando_autorizacao') status = 'Processando';
+  if (status === 'Pendente' && (venda.nfe_status_api === 'erro_autorizacao' || venda.nfe_status_api === 'denegado')) status = 'Rejeitada';
+  const classePorStatus = { Emitida: 'status-pago', Pendente: 'status-pendente', Processando: 'status-pendente', Rejeitada: 'status-vencido', Cancelada: 'status-vencido' };
   const classe = classePorStatus[status] || 'status-pendente';
   const numero = venda.numero_nf ? ` nº ${escapeHtml(venda.numero_nf)}` : '';
   return `<span class="status-badge ${classe}">${escapeHtml(status)}${numero}</span>`;
@@ -2828,7 +2856,11 @@ function atualizarTabelaNotasFiscais() {
         <td>${escapeHtml(cliente ? cliente.razao_social : '-')}</td>
         <td>${v.data_emissao_nf ? formatarDataBr(v.data_emissao_nf) : '-'}</td>
         <td>${formatarMoeda(v.valor_total)}</td>
-        <td class="acoes"><button type="button" onclick="event.stopPropagation(); verItensVenda(${v.id})" title="Ver detalhes">👁️</button></td>
+        <td class="acoes">
+          <button type="button" onclick="event.stopPropagation(); verItensVenda(${v.id})" title="Ver detalhes">👁️</button>
+          ${v.nfe_caminho_danfe ? `<button type="button" onclick="event.stopPropagation(); abrirArquivoNfe(${v.id}, 'danfe')" title="Abrir DANFE (PDF)">📄</button>` : ''}
+          ${v.nfe_ref ? `<button type="button" class="btn-emitir-nfe" onclick="event.stopPropagation(); abrirGerenciarNfeVenda(${v.id})" title="DANFE, XML, carta de correção, cancelamento">🧾 NF-e</button>` : ''}
+        </td>
       </tr>
     `;
   }).join('');
@@ -2950,6 +2982,10 @@ function imprimirVenda(id) {
 function excluirVenda(id) {
   const vendas = loadList('vendas');
   const venda = vendas.find(v => v.id === id);
+  if (venda && venda.nfe_ref && ['autorizado', 'processando_autorizacao'].includes(venda.nfe_status_api)) {
+    alert('Esta venda tem uma NF-e autorizada (ou em processamento). Cancele a NF-e antes de excluir a venda.');
+    return;
+  }
   const temRecebimento = !!(venda && venda.recebimento_gerado);
   const mensagem = temRecebimento
     ? 'Deseja realmente excluir esta venda? O estoque baixado será devolvido e as parcelas geradas em Contas a Receber serão removidas.'
@@ -2963,16 +2999,1032 @@ function excluirVenda(id) {
   renderVendas();
 }
 
-/* "Emitir NFe": grava os dados da Nota Fiscal (status, número, série, data, chave de acesso)
-   e, ao marcar como Emitida, dá saída no estoque e lança as parcelas em Contas a Receber —
-   mesmo efeito de "Gerar Recebimento", só que junto com o registro da nota. */
+/* =====================================================================
+   NOTA FISCAL ELETRÔNICA (NF-e modelo 55) — emissão via Focus NFe
+   ---------------------------------------------------------------------
+   O PAPTECH monta o JSON da nota a partir da venda e envia para um
+   "intermediário" (Edge Function do Supabase ou servidor.js na loja),
+   que guarda o token da Focus NFe e repassa o pedido. A Focus assina com
+   o certificado A1 da empresa, transmite para a SEFAZ e devolve DANFE/XML.
+   ===================================================================== */
+
+const NFE_FOCUS_BASES = {
+  homologacao: 'https://homologacao.focusnfe.com.br',
+  producao: 'https://api.focusnfe.com.br',
+};
+/* A chave do intermediário fica só neste computador (não vai para a nuvem
+   junto com as outras configurações, para não ficar exposta). */
+const CHAVE_LOCAL_NFE_INTERMEDIARIO = 'paptech_nfe_chave_intermediario';
+
+const NFE_CONFIG_PADRAO = {
+  ambiente: 'homologacao',
+  conexao: 'supabase',
+  url_intermediario: '',
+  regime_tributario: '1',
+  natureza_operacao: 'VENDA DE MERCADORIA',
+  icms_cst_padrao: '102',
+  origem_padrao: '0',
+  cfop_padrao: '5102',
+  pis_cst_padrao: '49',
+  cofins_cst_padrao: '49',
+  presenca_comprador: '1',
+  forma_pagamento_vista: '01',
+  forma_pagamento_prazo: '15',
+  informacoes_complementares: '',
+};
+
+const NFE_OPCOES_ORIGEM = [
+  '0 - Nacional',
+  '1 - Estrangeira (importação direta)',
+  '2 - Estrangeira (adquirida no mercado interno)',
+  '3 - Nacional, conteúdo de importação > 40% e <= 70%',
+  '4 - Nacional, processos produtivos básicos',
+  '5 - Nacional, conteúdo de importação <= 40%',
+  '6 - Estrangeira (importação direta, sem similar nacional)',
+  '7 - Estrangeira (mercado interno, sem similar nacional)',
+  '8 - Nacional, conteúdo de importação > 70%',
+];
+const NFE_FORMAS_PAGAMENTO = [
+  ['01', 'Dinheiro'], ['02', 'Cheque'], ['03', 'Cartão de Crédito'], ['04', 'Cartão de Débito'],
+  ['05', 'Crédito Loja'], ['15', 'Boleto Bancário'], ['16', 'Depósito Bancário'], ['17', 'PIX'],
+  ['18', 'Transferência bancária'], ['90', 'Sem pagamento'], ['99', 'Outros'],
+];
+const NFE_PRESENCA = [
+  ['1', 'Operação presencial (balcão)'], ['2', 'Não presencial, internet'],
+  ['3', 'Não presencial, teleatendimento'], ['4', 'Entrega em domicílio'], ['9', 'Não presencial, outros'],
+];
+const NFE_REGIMES = [
+  ['1', 'Simples Nacional'], ['2', 'Simples Nacional — excesso de sublimite'], ['3', 'Regime Normal (Lucro Presumido/Real)'],
+];
+
+function configNfe() {
+  return { ...NFE_CONFIG_PADRAO, ...(obterConfiguracoes().nfe || {}) };
+}
+
+function chaveIntermediarioNfe() {
+  return localStorage.getItem(CHAVE_LOCAL_NFE_INTERMEDIARIO) || '';
+}
+
+function urlIntermediarioNfe(cfg) {
+  cfg = cfg || configNfe();
+  if (cfg.conexao === 'supabase') {
+    return SUPABASE_URL ? SUPABASE_URL.replace(/\/+$/, '') + '/functions/v1/focus-nfe' : '';
+  }
+  return String(cfg.url_intermediario || '').trim().replace(/\/+$/, '');
+}
+
+function nfeConfigurada() {
+  return !!(urlIntermediarioNfe() && chaveIntermediarioNfe());
+}
+
+function somenteDigitos(valor) {
+  return String(valor ?? '').replace(/\D/g, '');
+}
+
+function arred2(valor) {
+  return Math.round((Number(valor) || 0) * 100) / 100;
+}
+
+/* Data/hora local com fuso (ex: 2026-10-04T10:15:00-03:00), formato aceito pela SEFAZ. */
+function dataHoraLocalComFuso(data) {
+  const d = data || new Date();
+  const p = n => String(Math.abs(Math.floor(n))).padStart(2, '0');
+  const offset = -d.getTimezoneOffset();
+  const sinal = offset >= 0 ? '+' : '-';
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+    + `${sinal}${p(offset / 60)}:${p(offset % 60)}`;
+}
+
+function dataHojeLocalIso() {
+  return dataHoraLocalComFuso().slice(0, 10);
+}
+
+/* Chamada ao intermediário. Devolve { status, dados } — "dados" é o JSON
+   retornado pela Focus NFe (ou pelo próprio intermediário em caso de erro). */
+async function chamarFocusNfe(metodo, caminho, corpo) {
+  const cfg = configNfe();
+  const base = urlIntermediarioNfe(cfg);
+  if (!base) throw new Error('O intermediário de NF-e não está configurado (Configurações → Nota Fiscal Eletrônica).');
+  const headers = {
+    'Content-Type': 'application/json',
+    'X-Ambiente': cfg.ambiente === 'producao' ? 'producao' : 'homologacao',
+    'X-Paptech-Chave': chaveIntermediarioNfe(),
+  };
+  if (cfg.conexao === 'supabase' && SUPABASE_ANON_KEY) {
+    headers.Authorization = 'Bearer ' + SUPABASE_ANON_KEY;
+    headers.apikey = SUPABASE_ANON_KEY;
+  }
+  let resposta;
+  try {
+    resposta = await fetch(base + caminho, {
+      method: metodo,
+      headers,
+      body: corpo !== undefined ? JSON.stringify(corpo) : undefined,
+    });
+  } catch (erro) {
+    throw new Error('Não foi possível conectar ao intermediário de NF-e (' + base + '). Verifique a internet, se o intermediário está publicado/ligado e a URL nas Configurações.');
+  }
+  const texto = await resposta.text();
+  let dados;
+  try { dados = texto ? JSON.parse(texto) : {}; } catch (e) { dados = { mensagem: texto }; }
+  return { status: resposta.status, dados };
+}
+
+/* Junta as mensagens de erro que a Focus/SEFAZ devolvem num texto legível. */
+function mensagemErroFocus(dados, statusHttp) {
+  if (!dados) return 'Erro desconhecido (HTTP ' + statusHttp + ').';
+  const partes = [];
+  if (dados.mensagem_sefaz) partes.push((dados.status_sefaz ? dados.status_sefaz + ' - ' : '') + dados.mensagem_sefaz);
+  if (dados.mensagem) partes.push(dados.mensagem);
+  if (Array.isArray(dados.erros)) {
+    dados.erros.forEach(e => partes.push((e.campo ? e.campo + ': ' : '') + (e.mensagem || e.codigo || '')));
+  }
+  if (!partes.length && dados.codigo) partes.push(dados.codigo);
+  return partes.join('\n') || ('Erro HTTP ' + statusHttp + '.');
+}
+
+function urlArquivoFocus(venda, caminho) {
+  if (!caminho) return '';
+  if (/^https?:\/\//i.test(caminho)) return caminho;
+  return (NFE_FOCUS_BASES[venda.nfe_ambiente] || NFE_FOCUS_BASES.homologacao) + caminho;
+}
+
+function abrirArquivoNfe(vendaId, tipo) {
+  const venda = loadList('vendas').find(v => v.id === vendaId);
+  if (!venda) return;
+  const mapa = { danfe: venda.nfe_caminho_danfe, xml: venda.nfe_caminho_xml, cancelamento: venda.nfe_caminho_xml_cancelamento };
+  const url = urlArquivoFocus(venda, mapa[tipo]);
+  if (!url) {
+    alert('Arquivo ainda não disponível. Clique em "Consultar na SEFAZ" para atualizar.');
+    return;
+  }
+  window.open(url, '_blank', 'noopener');
+}
+
+/* ---------- montagem do JSON da NF-e a partir da venda ---------- */
+
+/* Separa origem e CST/CSOSN quando o código foi cadastrado junto (ex: "0102" ou "060"). */
+function decomporCstProduto(codigoBruto, regime) {
+  const codigo = somenteDigitos(codigoBruto);
+  const simples = regime === '1' || regime === '2';
+  if (simples) {
+    if (codigo.length === 4) return { origem: codigo[0], cst: codigo.slice(1) };
+    return { origem: null, cst: codigo };
+  }
+  if (codigo.length === 3) return { origem: codigo[0], cst: codigo.slice(1) };
+  return { origem: null, cst: codigo.padStart(2, '0') };
+}
+
+function ajustarCfopDestino(cfop, interestadual) {
+  const c = somenteDigitos(cfop);
+  if (c.length !== 4) return c;
+  if (interestadual && c[0] === '5') return '6' + c.slice(1);
+  if (!interestadual && c[0] === '6') return '5' + c.slice(1);
+  return c;
+}
+
+/* opcoes: { natureza, consumidor_final (bool|null), prazos (array dias), incluir_frete (bool),
+             volumes (número), informacoes (texto) }
+   Retorna { payload, erros[], avisos[], resumo } */
+function montarNfeVenda(venda, opcoes) {
+  opcoes = opcoes || {};
+  const cfg = configNfe();
+  const empresa = dadosEmpresaAtuais();
+  const cliente = loadList('clientes').find(c => c.id === venda.cliente_id);
+  const produtos = loadList('produtos');
+  const transportadora = venda.transportadora_id ? loadList('transportadoras').find(t => t.id === venda.transportadora_id) : null;
+  const erros = [];
+  const avisos = [];
+  const regime = cfg.regime_tributario;
+  const simples = regime === '1' || regime === '2';
+
+  // Emitente
+  const cnpjEmitente = somenteDigitos(empresa.cnpj);
+  const ufEmitente = String(empresa.uf || '').trim().toUpperCase();
+  if (cnpjEmitente.length !== 14) erros.push('CNPJ da empresa inválido ou não preenchido (Configurações → Dados da Empresa).');
+  if (ufEmitente.length !== 2) erros.push('UF da empresa não preenchida (Configurações → Dados da Empresa).');
+  if (!somenteDigitos(empresa.inscricao_estadual)) erros.push('Inscrição Estadual da empresa não preenchida (Configurações → Dados da Empresa).');
+
+  // Destinatário
+  if (!cliente) erros.push('Cliente da venda não encontrado.');
+  const c = cliente || {};
+  const docDest = somenteDigitos(c.cnpj);
+  const ufDest = String(c.uf || '').trim().toUpperCase();
+  if (cliente) {
+    if (docDest.length !== 14 && docDest.length !== 11) erros.push(`Cliente "${c.razao_social}": CNPJ/CPF inválido (precisa ter 14 ou 11 dígitos).`);
+    if (!String(c.endereco || '').trim()) erros.push(`Cliente "${c.razao_social}": endereço não preenchido.`);
+    if (!String(c.numero || '').trim()) avisos.push(`Cliente "${c.razao_social}": número do endereço vazio — será enviado "S/N".`);
+    if (!String(c.bairro || '').trim()) erros.push(`Cliente "${c.razao_social}": bairro não preenchido.`);
+    if (!String(c.cidade || '').trim()) erros.push(`Cliente "${c.razao_social}": cidade não preenchida.`);
+    if (ufDest.length !== 2) erros.push(`Cliente "${c.razao_social}": UF não preenchida.`);
+    if (somenteDigitos(c.cep).length !== 8) erros.push(`Cliente "${c.razao_social}": CEP inválido.`);
+  }
+  const ieDestBruta = String(c.inscricao_estadual || '').trim();
+  let indicadorIe = 9;
+  if (/isent/i.test(ieDestBruta)) indicadorIe = 2;
+  else if (somenteDigitos(ieDestBruta)) indicadorIe = 1;
+  const interestadual = ufEmitente && ufDest && ufEmitente !== ufDest;
+  const consumidorFinal = opcoes.consumidor_final == null ? indicadorIe === 9 : !!opcoes.consumidor_final;
+  if (interestadual && consumidorFinal && indicadorIe === 9) {
+    avisos.push('Venda interestadual para consumidor final não contribuinte: pode haver DIFAL a recolher — confirme com seu contador.');
+  }
+
+  // Itens
+  const itensVenda = venda.itens || [];
+  if (!itensVenda.length) erros.push('A venda não tem itens.');
+  const valorProdutos = arred2(itensVenda.reduce((s, it) => s + arred2(it.valor_total), 0));
+  const valorFrete = opcoes.incluir_frete ? arred2(venda.valor_frete) : 0;
+  let freteDistribuido = 0;
+
+  const items = itensVenda.map((it, i) => {
+    const produto = produtos.find(p => p.id === it.produto_id) || {};
+    const rotulo = `Item ${i + 1} (${it.descricao})`;
+    const ncm = somenteDigitos(produto.ncm);
+    if (ncm.length !== 8) erros.push(`${rotulo}: NCM não cadastrado ou inválido (precisa de 8 dígitos) — ajuste no cadastro do produto, aba Impostos.`);
+    const cstInfo = decomporCstProduto(produto.cst_csosn || cfg.icms_cst_padrao, regime);
+    const origemProduto = somenteDigitos(String(produto.origem || '').slice(0, 1));
+    const origem = origemProduto || cstInfo.origem || somenteDigitos(cfg.origem_padrao) || '0';
+    const cst = cstInfo.cst;
+    if (simples && cst.length !== 3) erros.push(`${rotulo}: no Simples Nacional o código deve ser um CSOSN de 3 dígitos (ex: 102, 500). Cadastrado: "${produto.cst_csosn || cfg.icms_cst_padrao}".`);
+    if (!simples && cst.length !== 2) erros.push(`${rotulo}: no Regime Normal o código deve ser um CST de 2 dígitos (ex: 00, 60). Cadastrado: "${produto.cst_csosn || cfg.icms_cst_padrao}".`);
+    const cfop = ajustarCfopDestino(produto.cfop || cfg.cfop_padrao, interestadual);
+    if (cfop.length !== 4) erros.push(`${rotulo}: CFOP inválido.`);
+
+    const quantidade = Number(it.quantidade) || 0;
+    const valorBruto = arred2(it.valor_total);
+    const valorUnit = quantidade ? Number(it.valor_unitario) || valorBruto / quantidade : 0;
+    let freteItem = 0;
+    if (valorFrete > 0) {
+      freteItem = i === itensVenda.length - 1
+        ? arred2(valorFrete - freteDistribuido)
+        : arred2(valorProdutos ? valorFrete * valorBruto / valorProdutos : 0);
+      freteDistribuido = arred2(freteDistribuido + freteItem);
+    }
+    const unidade = (String(produto.unidade_medida || 'UN').trim().toUpperCase() || 'UN').slice(0, 6);
+    const gtin = somenteDigitos(produto.gtin_venda);
+    const gtinValido = [8, 12, 13, 14].includes(gtin.length) ? gtin : 'SEM GTIN';
+
+    const item = {
+      numero_item: i + 1,
+      codigo_produto: String(produto.cod_interno || it.produto_id || i + 1),
+      descricao: String(it.descricao || produto.descricao || '').slice(0, 120),
+      codigo_ncm: ncm,
+      cfop: cfop,
+      unidade_comercial: unidade,
+      quantidade_comercial: quantidade,
+      valor_unitario_comercial: Number(valorUnit.toFixed(10)),
+      unidade_tributavel: unidade,
+      quantidade_tributavel: quantidade,
+      valor_unitario_tributavel: Number(valorUnit.toFixed(10)),
+      valor_bruto: valorBruto,
+      codigo_barras_comercial: gtinValido,
+      codigo_barras_tributavel: gtinValido,
+      inclui_no_total: 1,
+      icms_origem: Number(origem),
+      icms_situacao_tributaria: cst,
+    };
+    if (freteItem > 0) item.valor_frete = freteItem;
+
+    // ICMS próprio destacado no Regime Normal (CST 00)
+    if (!simples && cst === '00') {
+      const aliq = Number(produto.aliquota_icms) || 0;
+      if (!aliq) erros.push(`${rotulo}: CST 00 exige alíquota de ICMS no cadastro do produto.`);
+      const base = arred2(valorBruto + freteItem);
+      item.icms_modalidade_base_calculo = 3;
+      item.icms_base_calculo = base;
+      item.icms_aliquota = aliq;
+      item.icms_valor = arred2(base * aliq / 100);
+    } else if (!simples && !['40', '41', '50', '60'].includes(cst)) {
+      avisos.push(`${rotulo}: CST ${cst} pode exigir campos que o PAPTECH ainda não envia (redução de base/ST). Se a SEFAZ rejeitar, confira com o contador.`);
+    }
+    if (simples && ['101', '201', '202', '203', '900'].includes(cst)) {
+      avisos.push(`${rotulo}: CSOSN ${cst} exige campos extras (crédito/ST). O mais comum para revenda é 102 (sem ST) ou 500 (ST já recolhida).`);
+    }
+
+    // PIS / COFINS
+    [['pis', cfg.pis_cst_padrao, produto.aliquota_pis], ['cofins', cfg.cofins_cst_padrao, produto.aliquota_cofins]].forEach(([tributo, cstPadrao, aliquotaProduto]) => {
+      const cstTrib = somenteDigitos(cstPadrao).padStart(2, '0');
+      item[`${tributo}_situacao_tributaria`] = cstTrib;
+      const aliq = Number(aliquotaProduto) || 0;
+      if (['01', '02'].includes(cstTrib) || Number(cstTrib) >= 49) {
+        const base = ['01', '02'].includes(cstTrib) || aliq ? valorBruto : 0;
+        item[`${tributo}_base_calculo`] = base;
+        item[`${tributo}_aliquota_porcentual`] = aliq;
+        item[`${tributo}_valor`] = arred2(base * aliq / 100);
+      }
+    });
+    return item;
+  });
+
+  const valorTotal = arred2(valorProdutos + valorFrete);
+
+  // Pagamento / duplicatas
+  const prazos = Array.isArray(opcoes.prazos) && opcoes.prazos.length ? opcoes.prazos : [0];
+  const aPrazo = prazos.some(d => d > 0);
+  const formasPagamento = [{
+    indicador_pagamento: aPrazo ? 1 : 0,
+    forma_pagamento: aPrazo ? cfg.forma_pagamento_prazo : cfg.forma_pagamento_vista,
+    valor_pagamento: cfg.forma_pagamento_vista === '90' && !aPrazo ? 0 : valorTotal,
+  }];
+  let duplicatas = null;
+  if (aPrazo) {
+    const dataBase = venda.data_venda || dataHojeLocalIso();
+    const valorBase = Math.floor((valorTotal / prazos.length) * 100) / 100;
+    let soma = 0;
+    duplicatas = prazos.map((dias, i) => {
+      const ultima = i === prazos.length - 1;
+      const valor = ultima ? arred2(valorTotal - soma) : valorBase;
+      soma = arred2(soma + valor);
+      return { numero: String(i + 1).padStart(3, '0'), data_vencimento: adicionarDias(dataBase, dias), valor };
+    });
+  }
+
+  // Frete
+  const modalidadePorTexto = { Remetente: 0, 'Destinatário': 1, 'Sem Frete': 9 };
+  let modalidadeFrete = modalidadePorTexto[venda.frete_por_conta];
+  if (modalidadeFrete === undefined) modalidadeFrete = transportadora ? 1 : 9;
+
+  const payload = {
+    natureza_operacao: String(opcoes.natureza || cfg.natureza_operacao || 'VENDA DE MERCADORIA').slice(0, 60),
+    data_emissao: dataHoraLocalComFuso(),
+    data_entrada_saida: dataHoraLocalComFuso(),
+    tipo_documento: 1,
+    finalidade_emissao: 1,
+    local_destino: interestadual ? 2 : 1,
+    consumidor_final: consumidorFinal ? 1 : 0,
+    presenca_comprador: Number(cfg.presenca_comprador) || 9,
+
+    cnpj_emitente: cnpjEmitente,
+    nome_emitente: empresa.razao_social || '',
+    nome_fantasia_emitente: empresa.nome_fantasia || '',
+    logradouro_emitente: empresa.endereco || '',
+    numero_emitente: empresa.numero || 'S/N',
+    bairro_emitente: empresa.bairro || '',
+    municipio_emitente: empresa.cidade || '',
+    uf_emitente: ufEmitente,
+    cep_emitente: somenteDigitos(empresa.cep),
+    telefone_emitente: somenteDigitos(empresa.telefone),
+    inscricao_estadual_emitente: somenteDigitos(empresa.inscricao_estadual),
+    regime_tributario_emitente: Number(regime),
+
+    nome_destinatario: String(c.razao_social || '').slice(0, 60),
+    logradouro_destinatario: c.endereco || '',
+    numero_destinatario: String(c.numero || '').trim() || 'S/N',
+    bairro_destinatario: c.bairro || '',
+    municipio_destinatario: c.cidade || '',
+    uf_destinatario: ufDest,
+    cep_destinatario: somenteDigitos(c.cep),
+    pais_destinatario: 'Brasil',
+    indicador_inscricao_estadual_destinatario: indicadorIe,
+
+    modalidade_frete: modalidadeFrete,
+    valor_produtos: valorProdutos,
+    valor_frete: valorFrete,
+    valor_seguro: 0,
+    valor_desconto: 0,
+    valor_outras_despesas: 0,
+    valor_total: valorTotal,
+    formas_pagamento: formasPagamento,
+    items,
+  };
+  if (docDest.length === 11) payload.cpf_destinatario = docDest; else payload.cnpj_destinatario = docDest;
+  if (indicadorIe === 1) payload.inscricao_estadual_destinatario = somenteDigitos(ieDestBruta);
+  if (somenteDigitos(c.telefone)) payload.telefone_destinatario = somenteDigitos(c.telefone);
+  if (String(c.email || '').includes('@')) payload.email_destinatario = String(c.email).trim();
+
+  if (duplicatas) {
+    payload.numero_fatura = String(venda.numero || venda.id);
+    payload.valor_original_fatura = valorTotal;
+    payload.valor_desconto_fatura = 0;
+    payload.valor_liquido_fatura = valorTotal;
+    payload.duplicatas = duplicatas;
+  }
+
+  if (transportadora) {
+    const docTransp = somenteDigitos(transportadora.cnpj);
+    if (docTransp.length === 11) payload.cpf_transportador = docTransp;
+    else if (docTransp.length === 14) payload.cnpj_transportador = docTransp;
+    payload.nome_transportador = String(transportadora.razao_social || '').slice(0, 60);
+    if (somenteDigitos(transportadora.inscricao_estadual)) payload.inscricao_estadual_transportador = somenteDigitos(transportadora.inscricao_estadual);
+    if (transportadora.endereco) payload.endereco_transportador = [transportadora.endereco, transportadora.numero].filter(Boolean).join(', ').slice(0, 60);
+    if (transportadora.cidade) payload.municipio_transportador = transportadora.cidade;
+    if (transportadora.uf) payload.uf_transportador = String(transportadora.uf).toUpperCase();
+  }
+
+  const pesoTotal = Number(venda.peso_total) || 0;
+  const qtdVolumes = Math.max(0, Math.round(Number(opcoes.volumes) || 0));
+  if (qtdVolumes || venda.especie || pesoTotal) {
+    const volume = {};
+    if (qtdVolumes) volume.quantidade = qtdVolumes;
+    if (venda.especie) volume.especie = String(venda.especie).slice(0, 60);
+    if (pesoTotal) { volume.peso_bruto = Number(pesoTotal.toFixed(3)); volume.peso_liquido = Number(pesoTotal.toFixed(3)); }
+    payload.volumes = [volume];
+  }
+
+  const informacoes = String(opcoes.informacoes ?? cfg.informacoes_complementares ?? '').trim();
+  if (informacoes) payload.informacoes_adicionais_contribuinte = informacoes.slice(0, 2000);
+
+  return {
+    payload, erros, avisos,
+    resumo: { valorProdutos, valorFrete, valorTotal, interestadual, consumidorFinal, indicadorIe, prazos, duplicatas },
+  };
+}
+
+/* ---------- tela "Emitir NFe" ---------- */
+
+function textoStatusApiNfe(status) {
+  return ({
+    processando_autorizacao: 'Processando na SEFAZ',
+    autorizado: 'Autorizada',
+    cancelado: 'Cancelada',
+    erro_autorizacao: 'Rejeitada pela SEFAZ',
+    denegado: 'Denegada',
+  })[status] || status || '';
+}
+
+function ambienteNfeHtml(ambiente) {
+  return ambiente === 'producao'
+    ? '<span class="nfe-ambiente nfe-ambiente-producao">PRODUÇÃO — nota com valor fiscal</span>'
+    : '<span class="nfe-ambiente nfe-ambiente-homologacao">HOMOLOGAÇÃO — teste, sem valor fiscal</span>';
+}
+
+function opcoesNfeDoFormulario(venda) {
+  const campo = id => document.getElementById(id);
+  const prazosInput = campo('nfe-emitir-prazos');
+  return {
+    natureza: campo('nfe-emitir-natureza') ? campo('nfe-emitir-natureza').value.trim() : '',
+    consumidor_final: campo('nfe-emitir-consumidor') ? campo('nfe-emitir-consumidor').checked : null,
+    prazos: prazosInput ? parsePrazosPagamento(prazosInput.value) : (venda.prazos_pagamento || [0]),
+    incluir_frete: campo('nfe-emitir-frete') ? campo('nfe-emitir-frete').checked : false,
+    volumes: campo('nfe-emitir-volumes') ? campo('nfe-emitir-volumes').value : 0,
+    informacoes: campo('nfe-emitir-informacoes') ? campo('nfe-emitir-informacoes').value : '',
+  };
+}
+
 function abrirEmitirNfeVenda(vendaId) {
+  const venda = loadList('vendas').find(v => v.id === vendaId);
+  if (!venda) return;
+
+  // Já tem NF-e transmitida por aqui: abre o gerenciamento (DANFE, cancelar, CC-e...)
+  if (venda.nfe_ref && ['autorizado', 'cancelado', 'processando_autorizacao'].includes(venda.nfe_status_api)) {
+    abrirGerenciarNfeVenda(vendaId);
+    return;
+  }
+
+  const cfg = configNfe();
+  const configurada = nfeConfigurada();
+  const indicadorIeInicial = montarNfeVenda(venda, { prazos: venda.prazos_pagamento }).resumo.indicadorIe;
+  const opcoesIniciais = {
+    natureza: cfg.natureza_operacao,
+    consumidor_final: indicadorIeInicial === 9,
+    prazos: venda.recebimento_gerado ? venda.prazos_pagamento : parsePrazosPagamento(construirPrazosDisplay(venda)),
+    incluir_frete: false,
+    volumes: 1,
+    informacoes: cfg.informacoes_complementares,
+  };
+  const { erros, avisos, resumo, payload } = montarNfeVenda(venda, opcoesIniciais);
+
+  const linhasItens = payload.items.map(it => `
+    <tr>
+      <td>${escapeHtml(it.descricao)}</td>
+      <td>${escapeHtml(it.codigo_ncm || '—')}</td>
+      <td>${escapeHtml(it.cfop)}</td>
+      <td>${escapeHtml(it.icms_situacao_tributaria)}</td>
+      <td style="text-align:right">${String(it.quantidade_comercial).replace('.', ',')}</td>
+      <td style="text-align:right">${formatarMoeda(it.valor_bruto)}</td>
+    </tr>
+  `).join('');
+
+  const ultimaRejeicao = venda.nfe_status_api === 'erro_autorizacao' || venda.nfe_status_api === 'denegado'
+    ? `<div class="nfe-erros"><strong>Última tentativa ${escapeHtml(textoStatusApiNfe(venda.nfe_status_api).toLowerCase())}:</strong><br>${escapeHtml(venda.nfe_mensagem || '').replace(/\n/g, '<br>')}<br><em>Corrija o problema e transmita de novo.</em></div>`
+    : '';
+
+  abrirModal(`
+    <h2>Emitir NF-e — Venda #${venda.id}</h2>
+    ${configurada ? `<div style="margin-bottom:12px">${ambienteNfeHtml(cfg.ambiente)}</div>` : `
+      <div class="aviso">A emissão automática ainda não está configurada neste computador. Configure em
+      <a href="#" onclick="fecharModal(); irParaSecao('configuracoes'); return false;">Configurações → Nota Fiscal Eletrônica</a>,
+      ou registre abaixo uma nota emitida em outro sistema.</div>`}
+    ${ultimaRejeicao}
+    ${erros.length ? `<div class="nfe-erros"><strong>Corrija antes de transmitir:</strong><ul>${erros.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul></div>` : ''}
+    ${avisos.length ? `<div class="aviso"><ul style="margin:0;padding-left:18px">${avisos.map(a => `<li>${escapeHtml(a)}</li>`).join('')}</ul></div>` : ''}
+
+    <table class="data-table">
+      <thead><tr><th>Produto</th><th>NCM</th><th>CFOP</th><th>${cfg.regime_tributario === '3' ? 'CST' : 'CSOSN'}</th><th>Qtd.</th><th>Valor</th></tr></thead>
+      <tbody>${linhasItens || '<tr><td colspan="6" class="vazio">Sem itens.</td></tr>'}</tbody>
+    </table>
+    <div class="nfe-totais">
+      Produtos: <strong>${formatarMoeda(resumo.valorProdutos)}</strong>
+      &nbsp;·&nbsp; ${resumo.interestadual ? 'Operação interestadual' : 'Operação dentro do estado'}
+    </div>
+
+    <div class="campos-empresa-grid">
+      <div class="campo campo-span-2">
+        <label>Natureza da Operação</label>
+        <input type="text" id="nfe-emitir-natureza" value="${escapeHtml(opcoesIniciais.natureza)}" maxlength="60">
+      </div>
+      ${venda.recebimento_gerado ? `
+        <div class="campo campo-span-2"><label>Condição de Pagamento</label>
+          <div>${escapeHtml(formatarCondicaoPagamento(venda))} <em>(recebimento já gerado — vai para a nota como está)</em></div></div>
+      ` : `
+        <div class="campo">
+          <label>Prazos em dias (ex: 30/60/90 — em branco = à vista)</label>
+          <input type="text" id="nfe-emitir-prazos" value="${escapeHtml(construirPrazosDisplay(venda))}" placeholder="30/60/90">
+        </div>
+      `}
+      <div class="campo">
+        <label>Quantidade de volumes</label>
+        <input type="text" id="nfe-emitir-volumes" value="1">
+      </div>
+      <div class="campo campo-checkbox campo-span-2">
+        <label><input type="checkbox" id="nfe-emitir-consumidor" ${opcoesIniciais.consumidor_final ? 'checked' : ''}> Cliente é consumidor final (usa a mercadoria, não revende)</label>
+      </div>
+      ${Number(venda.valor_frete) > 0 ? `
+        <div class="campo campo-checkbox campo-span-2">
+          <label><input type="checkbox" id="nfe-emitir-frete"> Cobrar o frete (${formatarMoeda(venda.valor_frete)}) dentro da nota — soma no total e nas parcelas</label>
+        </div>` : ''}
+      <div class="campo campo-span-2">
+        <label>Informações complementares (saem no rodapé do DANFE)</label>
+        <textarea id="nfe-emitir-informacoes" rows="3">${escapeHtml(opcoesIniciais.informacoes || '')}</textarea>
+      </div>
+    </div>
+    <div id="nfe-emitir-status" class="nfe-status" style="display:none"></div>
+
+    <div class="modal-botoes">
+      ${configurada ? `<button type="button" class="btn-primary" id="nfe-emitir-botao" onclick="transmitirNfeVenda(${venda.id})" ${erros.length ? 'disabled title="Corrija os erros acima"' : ''}>📤 Transmitir para a SEFAZ</button>` : ''}
+      <button type="button" class="btn-secondary" onclick="abrirRegistroManualNfeVenda(${venda.id})">Registrar nota emitida em outro sistema</button>
+      <button type="button" class="btn-secondary" onclick="fecharModal()">Fechar</button>
+    </div>
+  `);
+}
+
+function mostrarStatusNfe(texto, tipo) {
+  const el = document.getElementById('nfe-emitir-status');
+  if (!el) return;
+  el.style.display = 'block';
+  el.className = 'nfe-status' + (tipo ? ' nfe-status-' + tipo : '');
+  el.innerHTML = escapeHtml(texto).replace(/\n/g, '<br>');
+}
+
+function atualizarVendaNfe(vendaId, alteracoes) {
+  const vendas = loadList('vendas');
+  const idx = vendas.findIndex(v => v.id === vendaId);
+  if (idx === -1) return null;
+  vendas[idx] = { ...vendas[idx], ...alteracoes };
+  saveList('vendas', vendas);
+  return vendas[idx];
+}
+
+function esperar(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function transmitirNfeVenda(vendaId) {
+  const venda = loadList('vendas').find(v => v.id === vendaId);
+  if (!venda) return;
+  const cfg = configNfe();
+  const opcoes = opcoesNfeDoFormulario(venda);
+  const { payload, erros, resumo } = montarNfeVenda(venda, opcoes);
+  if (erros.length) {
+    alert('Corrija antes de transmitir:\n\n- ' + erros.join('\n- '));
+    return;
+  }
+  if (cfg.ambiente === 'producao' && !confirm(
+    `Transmitir a NF-e da Venda #${venda.id} em PRODUÇÃO?\n\nValor total: ${formatarMoeda(resumo.valorTotal)}\nCliente: ${payload.nome_destinatario}\n\nDepois de autorizada, a nota tem validade fiscal e só pode ser cancelada em até 24 horas.`
+  )) return;
+
+  // Reaproveita a mesma referência quando a tentativa anterior foi rejeitada
+  // (a Focus permite reenviar e mantém a numeração).
+  const ref = venda.nfe_ref && venda.nfe_status_api === 'erro_autorizacao' && venda.nfe_ambiente === cfg.ambiente
+    ? venda.nfe_ref
+    : `paptech-v${venda.id}-${Date.now().toString(36)}`;
+
+  const botao = document.getElementById('nfe-emitir-botao');
+  if (botao) { botao.disabled = true; botao.textContent = 'Transmitindo...'; }
+  mostrarStatusNfe('Enviando a nota para a Focus NFe...', 'info');
+
+  try {
+    const { status, dados } = await chamarFocusNfe('POST', `/v2/nfe?ref=${encodeURIComponent(ref)}`, payload);
+    if (status >= 400 && !dados.status) {
+      mostrarStatusNfe('A nota não foi aceita:\n' + mensagemErroFocus(dados, status), 'erro');
+      if (botao) { botao.disabled = false; botao.textContent = '📤 Transmitir para a SEFAZ'; }
+      return;
+    }
+    atualizarVendaNfe(vendaId, {
+      nfe_ref: ref,
+      nfe_ambiente: cfg.ambiente,
+      nfe_status_api: dados.status || 'processando_autorizacao',
+      nfe_mensagem: '',
+      nfe_envio: { prazos: resumo.prazos, valor_total: resumo.valorTotal, incluir_frete: !!opcoes.incluir_frete },
+    });
+
+    let retorno = dados;
+    for (let tentativa = 0; tentativa < 20 && (!retorno.status || retorno.status === 'processando_autorizacao'); tentativa++) {
+      mostrarStatusNfe(`Aguardando a SEFAZ autorizar... (${tentativa + 1})`, 'info');
+      await esperar(3000);
+      const consulta = await chamarFocusNfe('GET', `/v2/nfe/${encodeURIComponent(ref)}`);
+      retorno = consulta.dados || {};
+    }
+    const resultado = processarRetornoNfe(vendaId, retorno);
+    renderSecaoAtualAposNfe();
+    if (resultado === 'autorizado') {
+      fecharModal();
+      abrirGerenciarNfeVenda(vendaId, 'NF-e autorizada! O estoque foi baixado e as parcelas foram lançadas em Contas a Receber (se ainda não tinham sido).');
+    } else if (resultado === 'processando_autorizacao') {
+      mostrarStatusNfe('A SEFAZ ainda está processando. Feche esta janela e use "Consultar na SEFAZ" daqui a alguns minutos.', 'info');
+    } else {
+      mostrarStatusNfe(`${textoStatusApiNfe(retorno.status)}:\n${mensagemErroFocus(retorno, 200)}\n\nCorrija o problema e transmita de novo.`, 'erro');
+      if (botao) { botao.disabled = false; botao.textContent = '📤 Transmitir novamente'; }
+    }
+  } catch (erro) {
+    mostrarStatusNfe(erro.message, 'erro');
+    if (botao) { botao.disabled = false; botao.textContent = '📤 Transmitir para a SEFAZ'; }
+  }
+}
+
+/* Aplica o retorno da Focus na venda. Retorna o status da API. */
+function processarRetornoNfe(vendaId, dados) {
+  const venda = loadList('vendas').find(v => v.id === vendaId);
+  if (!venda || !dados) return null;
+  const status = dados.status || venda.nfe_status_api;
+  const base = {
+    nfe_status_api: status,
+    nfe_mensagem: dados.mensagem_sefaz ? `${dados.status_sefaz ? dados.status_sefaz + ' - ' : ''}${dados.mensagem_sefaz}` : (venda.nfe_mensagem || ''),
+  };
+
+  if (status === 'autorizado') {
+    const jaEmitida = venda.status_nf === 'Emitida';
+    const alteracoes = {
+      ...base,
+      status_nf: 'Emitida',
+      numero_nf: String(dados.numero || venda.numero_nf || ''),
+      serie_nf: String(dados.serie || venda.serie_nf || ''),
+      chave_nfe: somenteDigitos(dados.chave_nfe) || venda.chave_nfe || '',
+      data_emissao_nf: venda.data_emissao_nf && jaEmitida ? venda.data_emissao_nf : dataHojeLocalIso(),
+      nfe_protocolo: dados.protocolo || venda.nfe_protocolo || '',
+      nfe_caminho_danfe: dados.caminho_danfe || venda.nfe_caminho_danfe || '',
+      nfe_caminho_xml: dados.caminho_xml_nota_fiscal || venda.nfe_caminho_xml || '',
+    };
+    // Primeira vez que fica autorizada: baixa estoque e lança Contas a Receber
+    // (mesmo efeito do antigo "marcar como Emitida"), se ainda não foi gerado.
+    if (!jaEmitida && !venda.recebimento_gerado) {
+      const envio = venda.nfe_envio || {};
+      alteracoes.prazos_pagamento = Array.isArray(envio.prazos) && envio.prazos.length ? envio.prazos : (venda.prazos_pagamento || [0]);
+      alteracoes.recebimento_gerado = true;
+      const vendaAtualizada = atualizarVendaNfe(vendaId, alteracoes);
+      aplicarBaixaEstoqueVenda(vendaAtualizada.itens || []);
+      gerarParcelasReceber({ ...vendaAtualizada, valor_total: Number(envio.valor_total) || vendaAtualizada.valor_total });
+    } else {
+      atualizarVendaNfe(vendaId, alteracoes);
+    }
+    return status;
+  }
+
+  if (status === 'cancelado') {
+    atualizarVendaNfe(vendaId, {
+      ...base,
+      status_nf: 'Cancelada',
+      nfe_caminho_xml_cancelamento: dados.caminho_xml_cancelamento || venda.nfe_caminho_xml_cancelamento || '',
+    });
+    return status;
+  }
+
+  atualizarVendaNfe(vendaId, base);
+  return status;
+}
+
+function renderSecaoAtualAposNfe() {
+  const vendasVisivel = document.getElementById('sec-vendas');
+  const nfVisivel = document.getElementById('sec-notas-fiscais');
+  if (vendasVisivel && vendasVisivel.innerHTML) renderVendas();
+  if (nfVisivel && nfVisivel.innerHTML) renderNotasFiscais();
+}
+
+/* ---------- gerenciamento de uma NF-e já transmitida ---------- */
+
+function abrirGerenciarNfeVenda(vendaId, mensagemTopo) {
+  const venda = loadList('vendas').find(v => v.id === vendaId);
+  if (!venda) return;
+  const cliente = loadList('clientes').find(c => c.id === venda.cliente_id);
+  const autorizada = venda.nfe_status_api === 'autorizado';
+  const cartas = Array.isArray(venda.nfe_cartas_correcao) ? venda.nfe_cartas_correcao : [];
+
+  abrirModal(`
+    <h2>NF-e da Venda #${venda.id}</h2>
+    ${mensagemTopo ? `<div class="nfe-status nfe-status-ok">${escapeHtml(mensagemTopo)}</div>` : ''}
+    <div style="margin-bottom:12px">${ambienteNfeHtml(venda.nfe_ambiente)}</div>
+    <div class="info-cliente-caixa">
+      <div><strong>Situação:</strong> ${escapeHtml(textoStatusApiNfe(venda.nfe_status_api))}</div>
+      <div><strong>Cliente:</strong> ${escapeHtml(cliente ? cliente.razao_social : '-')}</div>
+      ${venda.numero_nf ? `<div><strong>Número:</strong> ${escapeHtml(venda.numero_nf)} &nbsp; <strong>Série:</strong> ${escapeHtml(venda.serie_nf || '-')} &nbsp; <strong>Emissão:</strong> ${venda.data_emissao_nf ? formatarDataBr(venda.data_emissao_nf) : '-'}</div>` : ''}
+      ${venda.chave_nfe ? `<div><strong>Chave de acesso:</strong> <span class="nfe-chave">${escapeHtml(venda.chave_nfe.replace(/(\d{4})(?=\d)/g, '$1 '))}</span></div>` : ''}
+      ${venda.nfe_protocolo ? `<div><strong>Protocolo:</strong> ${escapeHtml(venda.nfe_protocolo)}</div>` : ''}
+      ${venda.nfe_mensagem ? `<div><strong>Retorno SEFAZ:</strong> ${escapeHtml(venda.nfe_mensagem)}</div>` : ''}
+      ${cartas.length ? `<div><strong>Cartas de correção:</strong> ${cartas.map((cc, i) => cc.caminho_pdf
+        ? `<a href="${escapeHtml(urlArquivoFocus(venda, cc.caminho_pdf))}" target="_blank" rel="noopener">${i + 1}ª (${formatarDataBr(cc.data)})</a>`
+        : `${i + 1}ª (${formatarDataBr(cc.data)})`).join(', ')}</div>` : ''}
+    </div>
+    <div id="nfe-emitir-status" class="nfe-status" style="display:none"></div>
+    <div class="modal-botoes nfe-botoes">
+      ${venda.nfe_caminho_danfe ? `<button type="button" class="btn-primary" onclick="abrirArquivoNfe(${venda.id}, 'danfe')">📄 DANFE (PDF)</button>` : ''}
+      ${venda.nfe_caminho_xml ? `<button type="button" class="btn-secondary" onclick="abrirArquivoNfe(${venda.id}, 'xml')">XML</button>` : ''}
+      ${venda.nfe_caminho_xml_cancelamento ? `<button type="button" class="btn-secondary" onclick="abrirArquivoNfe(${venda.id}, 'cancelamento')">XML do cancelamento</button>` : ''}
+      <button type="button" class="btn-secondary" onclick="consultarNfeVenda(${venda.id})">🔄 Consultar na SEFAZ</button>
+      ${autorizada ? `<button type="button" class="btn-secondary" onclick="abrirCartaCorrecaoNfe(${venda.id})">✏️ Carta de Correção</button>` : ''}
+      ${autorizada ? `<button type="button" class="btn-perigo" onclick="abrirCancelarNfe(${venda.id})">Cancelar NF-e</button>` : ''}
+      <button type="button" class="btn-secondary" onclick="fecharModal()">Fechar</button>
+    </div>
+  `);
+}
+
+async function consultarNfeVenda(vendaId) {
+  const venda = loadList('vendas').find(v => v.id === vendaId);
+  if (!venda || !venda.nfe_ref) return;
+  mostrarStatusNfe('Consultando...', 'info');
+  try {
+    const { status, dados } = await chamarFocusNfe('GET', `/v2/nfe/${encodeURIComponent(venda.nfe_ref)}`);
+    if (status >= 400 && !dados.status) {
+      mostrarStatusNfe(mensagemErroFocus(dados, status), 'erro');
+      return;
+    }
+    const resultado = processarRetornoNfe(vendaId, dados);
+    renderSecaoAtualAposNfe();
+    if (resultado === 'erro_autorizacao' || resultado === 'denegado') {
+      fecharModal();
+      abrirEmitirNfeVenda(vendaId);
+      return;
+    }
+    abrirGerenciarNfeVenda(vendaId, 'Situação atualizada: ' + textoStatusApiNfe(resultado) + '.');
+  } catch (erro) {
+    mostrarStatusNfe(erro.message, 'erro');
+  }
+}
+
+function abrirCancelarNfe(vendaId) {
+  const venda = loadList('vendas').find(v => v.id === vendaId);
+  if (!venda) return;
+  abrirModal(`
+    <h2>Cancelar NF-e nº ${escapeHtml(venda.numero_nf || '')} — Venda #${venda.id}</h2>
+    <div class="aviso">O cancelamento é enviado para a SEFAZ e não pode ser desfeito. Na maioria dos estados o prazo é de até 24 horas após a autorização.</div>
+    <div class="campo">
+      <label>Justificativa (mínimo 15 caracteres)</label>
+      <textarea id="nfe-cancelar-justificativa" rows="3" maxlength="255" placeholder="Ex: Erro na digitação da quantidade do produto"></textarea>
+    </div>
+    ${venda.recebimento_gerado ? `
+      <div class="campo campo-checkbox">
+        <label><input type="checkbox" id="nfe-cancelar-estornar" checked> Devolver os itens ao estoque e remover as parcelas de Contas a Receber</label>
+      </div>` : ''}
+    <div id="nfe-emitir-status" class="nfe-status" style="display:none"></div>
+    <div class="modal-botoes">
+      <button type="button" class="btn-perigo" id="nfe-cancelar-botao" onclick="confirmarCancelarNfe(${venda.id})">Confirmar cancelamento</button>
+      <button type="button" class="btn-secondary" onclick="abrirGerenciarNfeVenda(${venda.id})">Voltar</button>
+    </div>
+  `);
+}
+
+async function confirmarCancelarNfe(vendaId) {
+  const venda = loadList('vendas').find(v => v.id === vendaId);
+  if (!venda) return;
+  const justificativa = document.getElementById('nfe-cancelar-justificativa').value.trim();
+  if (justificativa.length < 15) {
+    alert('A justificativa precisa ter pelo menos 15 caracteres.');
+    return;
+  }
+  const campoEstornar = document.getElementById('nfe-cancelar-estornar');
+  const estornar = !!(campoEstornar && campoEstornar.checked);
+  const botao = document.getElementById('nfe-cancelar-botao');
+  if (botao) { botao.disabled = true; botao.textContent = 'Cancelando...'; }
+  mostrarStatusNfe('Enviando o cancelamento para a SEFAZ...', 'info');
+  try {
+    const { status, dados } = await chamarFocusNfe('DELETE', `/v2/nfe/${encodeURIComponent(venda.nfe_ref)}`, { justificativa });
+    if (dados.status !== 'cancelado') {
+      mostrarStatusNfe('Cancelamento não realizado:\n' + mensagemErroFocus(dados, status), 'erro');
+      if (botao) { botao.disabled = false; botao.textContent = 'Confirmar cancelamento'; }
+      return;
+    }
+    processarRetornoNfe(vendaId, dados);
+    atualizarVendaNfe(vendaId, { nfe_justificativa_cancelamento: justificativa });
+    if (estornar && venda.recebimento_gerado) {
+      reverterEstoqueVenda(venda.itens || []);
+      removerContasReceberDaVenda(vendaId);
+      atualizarVendaNfe(vendaId, { recebimento_gerado: false });
+    }
+    renderSecaoAtualAposNfe();
+    abrirGerenciarNfeVenda(vendaId, 'NF-e cancelada na SEFAZ.' + (estornar ? ' Estoque devolvido e parcelas removidas.' : ''));
+  } catch (erro) {
+    mostrarStatusNfe(erro.message, 'erro');
+    if (botao) { botao.disabled = false; botao.textContent = 'Confirmar cancelamento'; }
+  }
+}
+
+function abrirCartaCorrecaoNfe(vendaId) {
+  const venda = loadList('vendas').find(v => v.id === vendaId);
+  if (!venda) return;
+  abrirModal(`
+    <h2>Carta de Correção — NF-e nº ${escapeHtml(venda.numero_nf || '')}</h2>
+    <div class="aviso">A Carta de Correção (CC-e) serve para corrigir erros de texto (endereço, descrição, transportadora...). Ela <strong>não pode</strong> alterar valores, quantidades, impostos, CNPJ/CPF do emitente ou destinatário, nem a data de emissão. Cada nova carta substitui a anterior, então escreva a correção completa.</div>
+    <div class="campo">
+      <label>Correção (mínimo 15 caracteres)</label>
+      <textarea id="nfe-cce-texto" rows="4" maxlength="1000"></textarea>
+    </div>
+    <div id="nfe-emitir-status" class="nfe-status" style="display:none"></div>
+    <div class="modal-botoes">
+      <button type="button" class="btn-primary" id="nfe-cce-botao" onclick="confirmarCartaCorrecaoNfe(${venda.id})">Enviar Carta de Correção</button>
+      <button type="button" class="btn-secondary" onclick="abrirGerenciarNfeVenda(${venda.id})">Voltar</button>
+    </div>
+  `);
+}
+
+async function confirmarCartaCorrecaoNfe(vendaId) {
+  const venda = loadList('vendas').find(v => v.id === vendaId);
+  if (!venda) return;
+  const correcao = document.getElementById('nfe-cce-texto').value.trim();
+  if (correcao.length < 15) {
+    alert('A correção precisa ter pelo menos 15 caracteres.');
+    return;
+  }
+  const botao = document.getElementById('nfe-cce-botao');
+  if (botao) { botao.disabled = true; botao.textContent = 'Enviando...'; }
+  mostrarStatusNfe('Enviando a carta de correção...', 'info');
+  try {
+    const { status, dados } = await chamarFocusNfe('POST', `/v2/nfe/${encodeURIComponent(venda.nfe_ref)}/carta_correcao`, { correcao });
+    if (dados.status !== 'autorizado') {
+      mostrarStatusNfe('Carta de correção não registrada:\n' + mensagemErroFocus(dados, status), 'erro');
+      if (botao) { botao.disabled = false; botao.textContent = 'Enviar Carta de Correção'; }
+      return;
+    }
+    const cartas = Array.isArray(venda.nfe_cartas_correcao) ? venda.nfe_cartas_correcao.slice() : [];
+    cartas.push({ data: dataHojeLocalIso(), correcao, caminho_pdf: dados.caminho_pdf_carta_correcao || '', caminho_xml: dados.caminho_xml_carta_correcao || '' });
+    atualizarVendaNfe(vendaId, { nfe_cartas_correcao: cartas });
+    abrirGerenciarNfeVenda(vendaId, 'Carta de correção registrada na SEFAZ.');
+  } catch (erro) {
+    mostrarStatusNfe(erro.message, 'erro');
+    if (botao) { botao.disabled = false; botao.textContent = 'Enviar Carta de Correção'; }
+  }
+}
+
+/* ---------- bloco de Configurações ---------- */
+
+function opcoesSelectHtml(lista, valorAtual) {
+  return lista.map(([valor, rotulo]) => `<option value="${escapeHtml(valor)}" ${String(valorAtual) === String(valor) ? 'selected' : ''}>${escapeHtml(valor)} - ${escapeHtml(rotulo)}</option>`).join('');
+}
+
+function blocoConfiguracaoNfeHtml() {
+  const cfg = configNfe();
+  const temSupabase = !!SUPABASE_URL;
+  return `
+    <h2 style="margin-top:28px">Nota Fiscal Eletrônica (NF-e) — Focus NFe</h2>
+    <div class="aviso">
+      O PAPTECH emite a NF-e pela <a href="https://focusnfe.com.br" target="_blank" rel="noopener">Focus NFe</a>:
+      ela assina a nota com o certificado A1 da empresa (cadastrado no painel da Focus), envia para a SEFAZ e devolve o DANFE e o XML.
+      O token da Focus fica guardado no <strong>intermediário</strong> (veja o passo a passo no README do sistema), nunca nesta página.
+      Comece sempre em <strong>Homologação</strong> para testar.
+    </div>
+    <div class="campos-empresa-grid">
+      <div class="campo">
+        <label>Ambiente</label>
+        <select id="nfe-cfg-ambiente">
+          <option value="homologacao" ${cfg.ambiente !== 'producao' ? 'selected' : ''}>Homologação (testes, sem valor fiscal)</option>
+          <option value="producao" ${cfg.ambiente === 'producao' ? 'selected' : ''}>Produção (notas reais)</option>
+        </select>
+      </div>
+      <div class="campo">
+        <label>Intermediário</label>
+        <select id="nfe-cfg-conexao" onchange="document.getElementById('nfe-cfg-url-caixa').style.display = this.value === 'url' ? '' : 'none'">
+          <option value="supabase" ${cfg.conexao !== 'url' ? 'selected' : ''} ${temSupabase ? '' : 'disabled'}>Supabase (função focus-nfe)${temSupabase ? '' : ' — Supabase não configurado'}</option>
+          <option value="url" ${cfg.conexao === 'url' ? 'selected' : ''}>URL própria (servidor.js na loja)</option>
+        </select>
+      </div>
+      <div class="campo campo-span-2" id="nfe-cfg-url-caixa" style="${cfg.conexao === 'url' ? '' : 'display:none'}">
+        <label>URL do intermediário (ex: http://192.168.0.10:8787)</label>
+        <input type="text" id="nfe-cfg-url" value="${escapeHtml(cfg.url_intermediario)}">
+      </div>
+      <div class="campo campo-span-2">
+        <label>Chave do intermediário (a mesma de PAPTECH_CHAVE_NFE) — fica salva só neste computador</label>
+        <input type="password" id="nfe-cfg-chave" value="${escapeHtml(chaveIntermediarioNfe())}" autocomplete="off">
+      </div>
+      <div class="campo">
+        <label>Regime tributário da empresa</label>
+        <select id="nfe-cfg-regime">${opcoesSelectHtml(NFE_REGIMES, cfg.regime_tributario)}</select>
+      </div>
+      <div class="campo">
+        <label>Natureza da operação padrão</label>
+        <input type="text" id="nfe-cfg-natureza" value="${escapeHtml(cfg.natureza_operacao)}" maxlength="60">
+      </div>
+      <div class="campo">
+        <label>CST/CSOSN padrão (quando o produto não tiver)</label>
+        <input type="text" id="nfe-cfg-cst" value="${escapeHtml(cfg.icms_cst_padrao)}" placeholder="Simples: 102 ou 500 · Normal: 00 ou 60">
+      </div>
+      <div class="campo">
+        <label>CFOP padrão (dentro do estado)</label>
+        <input type="text" id="nfe-cfg-cfop" value="${escapeHtml(cfg.cfop_padrao)}" placeholder="5102 (sem ST) ou 5405 (com ST)">
+      </div>
+      <div class="campo">
+        <label>Origem padrão da mercadoria</label>
+        <select id="nfe-cfg-origem">${NFE_OPCOES_ORIGEM.map(o => `<option value="${o[0]}" ${cfg.origem_padrao === o[0] ? 'selected' : ''}>${escapeHtml(o)}</option>`).join('')}</select>
+      </div>
+      <div class="campo">
+        <label>Presença do comprador</label>
+        <select id="nfe-cfg-presenca">${opcoesSelectHtml(NFE_PRESENCA, cfg.presenca_comprador)}</select>
+      </div>
+      <div class="campo">
+        <label>CST do PIS</label>
+        <input type="text" id="nfe-cfg-pis" value="${escapeHtml(cfg.pis_cst_padrao)}" placeholder="Simples: 49 ou 99 · Normal: 01">
+      </div>
+      <div class="campo">
+        <label>CST da COFINS</label>
+        <input type="text" id="nfe-cfg-cofins" value="${escapeHtml(cfg.cofins_cst_padrao)}" placeholder="Simples: 49 ou 99 · Normal: 01">
+      </div>
+      <div class="campo">
+        <label>Forma de pagamento à vista</label>
+        <select id="nfe-cfg-pag-vista">${opcoesSelectHtml(NFE_FORMAS_PAGAMENTO, cfg.forma_pagamento_vista)}</select>
+      </div>
+      <div class="campo">
+        <label>Forma de pagamento a prazo</label>
+        <select id="nfe-cfg-pag-prazo">${opcoesSelectHtml(NFE_FORMAS_PAGAMENTO, cfg.forma_pagamento_prazo)}</select>
+      </div>
+      <div class="campo campo-span-2">
+        <label>Informações complementares padrão (ex: texto do Simples Nacional exigido pelo contador)</label>
+        <textarea id="nfe-cfg-informacoes" rows="3">${escapeHtml(cfg.informacoes_complementares)}</textarea>
+      </div>
+    </div>
+    <div class="aviso">Confirme CST/CSOSN, CFOP e CST de PIS/COFINS com o seu contador. Em autopeças é comum a mercadoria ter ICMS-ST já recolhido (CSOSN 500 / CST 60 com CFOP 5405).</div>
+    <div id="nfe-cfg-teste" class="nfe-status" style="display:none"></div>
+    <div class="modal-botoes" style="margin-top:4px">
+      <button type="button" class="btn-primary" onclick="salvarConfiguracaoNfe()">Salvar Configuração da NF-e</button>
+      <button type="button" class="btn-secondary" onclick="testarConexaoNfe()">Testar conexão</button>
+    </div>
+  `;
+}
+
+function lerConfiguracaoNfeDaTela() {
+  const v = id => (document.getElementById(id) ? document.getElementById(id).value.trim() : '');
+  return {
+    ambiente: v('nfe-cfg-ambiente') === 'producao' ? 'producao' : 'homologacao',
+    conexao: v('nfe-cfg-conexao') === 'url' ? 'url' : 'supabase',
+    url_intermediario: v('nfe-cfg-url'),
+    regime_tributario: v('nfe-cfg-regime') || '1',
+    natureza_operacao: v('nfe-cfg-natureza') || NFE_CONFIG_PADRAO.natureza_operacao,
+    icms_cst_padrao: somenteDigitos(v('nfe-cfg-cst')),
+    origem_padrao: v('nfe-cfg-origem') || '0',
+    cfop_padrao: somenteDigitos(v('nfe-cfg-cfop')),
+    presenca_comprador: v('nfe-cfg-presenca') || '1',
+    pis_cst_padrao: somenteDigitos(v('nfe-cfg-pis')),
+    cofins_cst_padrao: somenteDigitos(v('nfe-cfg-cofins')),
+    forma_pagamento_vista: v('nfe-cfg-pag-vista') || '01',
+    forma_pagamento_prazo: v('nfe-cfg-pag-prazo') || '15',
+    informacoes_complementares: document.getElementById('nfe-cfg-informacoes') ? document.getElementById('nfe-cfg-informacoes').value.trim() : '',
+  };
+}
+
+function salvarConfiguracaoNfe(silencioso) {
+  const nova = lerConfiguracaoNfeDaTela();
+  const anterior = configNfe();
+  if (nova.ambiente === 'producao' && anterior.ambiente !== 'producao' && !silencioso &&
+      !confirm('Mudar para PRODUÇÃO? A partir daqui as notas transmitidas terão validade fiscal. Só faça isso depois de testar em Homologação.')) {
+    return false;
+  }
+  localStorage.setItem(CHAVE_LOCAL_NFE_INTERMEDIARIO, document.getElementById('nfe-cfg-chave').value.trim());
+  salvarConfiguracoes({ nfe: nova });
+  if (!silencioso) alert('Configuração da NF-e salva.');
+  return true;
+}
+
+async function testarConexaoNfe() {
+  if (!salvarConfiguracaoNfe(true)) return;
+  const caixa = document.getElementById('nfe-cfg-teste');
+  const mostrar = (texto, tipo) => {
+    caixa.style.display = 'block';
+    caixa.className = 'nfe-status nfe-status-' + tipo;
+    caixa.textContent = texto;
+  };
+  mostrar('Testando...', 'info');
+  try {
+    const { status, dados } = await chamarFocusNfe('GET', '/v2/nfe/paptech-teste-conexao');
+    if (status === 404) {
+      mostrar(`Conexão OK com a Focus NFe (${configNfe().ambiente === 'producao' ? 'produção' : 'homologação'}). Intermediário e token funcionando.`, 'ok');
+    } else if (dados && dados.erro === 'chave_intermediario_invalida') {
+      mostrar('O intermediário respondeu, mas recusou a chave. Confira se a chave digitada é igual a PAPTECH_CHAVE_NFE.', 'erro');
+    } else if (status === 401 || status === 403) {
+      mostrar('O intermediário funciona, mas a Focus NFe recusou o token. Confira o token de ' + (configNfe().ambiente === 'producao' ? 'produção' : 'homologação') + ' no intermediário.', 'erro');
+    } else {
+      mostrar(`Resposta inesperada (HTTP ${status}): ${mensagemErroFocus(dados, status)}`, 'erro');
+    }
+  } catch (erro) {
+    mostrar(erro.message, 'erro');
+  }
+}
+
+/* "Registrar nota emitida em outro sistema": grava os dados da Nota Fiscal (status, número,
+   série, data, chave de acesso) e, ao marcar como Emitida, dá saída no estoque e lança as
+   parcelas em Contas a Receber — mesmo efeito de "Gerar Recebimento". */
+function abrirRegistroManualNfeVenda(vendaId) {
   const venda = loadList('vendas').find(v => v.id === vendaId);
   if (!venda) return;
 
   abrirModal(`
     <h2>Emitir Nota Fiscal — Venda #${venda.id}</h2>
-    <div class="aviso">Preencha estes dados depois que a Nota Fiscal de venda for emitida (no seu emissor fiscal/contador). Aqui o sistema só guarda o registro — não emite a NF-e junto à SEFAZ. Marcar como "Emitida" dá saída no estoque e lança as parcelas em Contas a Receber.</div>
+    <div class="aviso">Use esta opção só para notas emitidas fora do PAPTECH (no emissor do contador, por exemplo). Aqui o sistema só guarda o registro. Marcar como "Emitida" dá saída no estoque e lança as parcelas em Contas a Receber.</div>
     <div class="campo">
       <label>Status da Nota Fiscal</label>
       <select id="nfe-venda-status">
@@ -3138,6 +4190,11 @@ function estornarRecebimentoVenda(vendaId) {
 }
 
 function abrirFormVendaManual(id) {
+  const vendaComNfe = id ? loadList('vendas').find(v => v.id === id) : null;
+  if (vendaComNfe && vendaComNfe.nfe_ref && ['autorizado', 'processando_autorizacao'].includes(vendaComNfe.nfe_status_api)) {
+    alert('Esta venda já tem NF-e autorizada (ou em processamento) e não pode ser alterada. Para corrigir textos use a Carta de Correção; para valores/itens, cancele a NF-e.');
+    return;
+  }
   const registro = id ? loadList('vendas').find(v => v.id === id) : null;
   itensVendaTemp = registro ? JSON.parse(JSON.stringify(registro.itens || [])) : [];
   produtoSelecionadoVenda = null;
@@ -3190,8 +4247,8 @@ function abrirFormVendaManual(id) {
       <div class="campo">
         <label>Frete por Conta</label>
         <select id="venda-frete-por-conta">
-          <option value="Destinatário" ${!registro || registro.frete_por_conta === 'Destinatário' ? 'selected' : ''}>Destinatário (CIF)</option>
-          <option value="Remetente" ${registro && registro.frete_por_conta === 'Remetente' ? 'selected' : ''}>Remetente (FOB)</option>
+          <option value="Destinatário" ${!registro || registro.frete_por_conta === 'Destinatário' ? 'selected' : ''}>Destinatário (FOB)</option>
+          <option value="Remetente" ${registro && registro.frete_por_conta === 'Remetente' ? 'selected' : ''}>Remetente (CIF)</option>
           <option value="Sem Frete" ${registro && registro.frete_por_conta === 'Sem Frete' ? 'selected' : ''}>Sem Frete</option>
         </select>
       </div>
@@ -4411,12 +5468,13 @@ function renderConfiguracoes() {
       <button type="button" class="btn-secondary" onclick="removerLogoConfiguracao()">Remover Logo</button>
     </div>
 
+    ${ehAdministrador ? blocoConfiguracaoNfeHtml() : ''}
+
     <h2 style="margin-top:28px">Certificado Digital A1 (para emissão de NF-e)</h2>
     <div class="aviso">
       Para emitir Nota Fiscal eletrônica de verdade (autorizada pela SEFAZ), a empresa precisa
       de um <strong>certificado digital A1</strong> no CNPJ dela. É um arquivo (.pfx) comprado
-      numa certificadora credenciada, que seu contador ou o provedor de NF-e usa para assinar as
-      notas. <strong>Por segurança, o PAPTECH não armazena esse arquivo</strong> — ele é
+      numa certificadora credenciada, que a Focus NFe usa para assinar as notas emitidas pelo PAPTECH. <strong>Por segurança, o PAPTECH não armazena esse arquivo</strong> — ele é
       instalado direto no provedor de emissão de NF-e que você contratar (ex: Focus NFe,
       PlugNotas, eNotas), nunca aqui no sistema.
     </div>

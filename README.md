@@ -62,6 +62,55 @@ Se dois computadores estiverem com a tela aberta ao mesmo tempo, um não vê
 instantaneamente o que o outro está digitando antes de salvar — é preciso
 salvar (ou recarregar a página) para ver as mudanças do outro computador.
 
+## Emissão de NF-e (Nota Fiscal Eletrônica, modelo 55)
+
+O PAPTECH transmite a NF-e da venda para a SEFAZ através da **[Focus NFe](https://focusnfe.com.br)**
+(serviço pago por nota/mês). Fluxo: **Vendas → 🧾 Emitir NFe → Transmitir para a SEFAZ**.
+Quando a nota é autorizada, o sistema guarda número, série, chave e protocolo, dá baixa no estoque
+e lança as parcelas em Contas a Receber. Depois dá para abrir o **DANFE (PDF)** e o **XML**,
+**consultar** a situação, emitir **Carta de Correção** e **cancelar** a nota.
+
+Antes de transmitir, o sistema confere os dados obrigatórios (CNPJ/IE da empresa, endereço completo
+do cliente, NCM de 8 dígitos, CST/CSOSN, CFOP) e mostra o que falta corrigir.
+
+### Por que existe um "intermediário"
+
+O navegador não consegue chamar a Focus NFe diretamente (bloqueio de CORS) e o token da Focus não
+pode ficar visível no código da página. Por isso o PAPTECH conversa com um pequeno intermediário,
+que guarda o token e só aceita pedidos de quem tiver a **chave do intermediário**. Há duas opções:
+
+**Opção A — Supabase (recomendada, já que o sistema usa Supabase):**
+
+1. No painel do Supabase: **Edge Functions → Deploy a new function → Via Editor**, nome `focus-nfe`.
+2. Cole o conteúdo de `supabase/functions/focus-nfe/index.ts` e publique.
+3. Em **Edge Functions → Secrets**, crie:
+   - `PAPTECH_CHAVE_NFE` — uma senha forte que você inventa;
+   - `FOCUS_TOKEN_HOMOLOGACAO` — token de homologação do painel da Focus NFe;
+   - `FOCUS_TOKEN_PRODUCAO` — token de produção do painel da Focus NFe.
+
+**Opção B — um computador da loja (Node.js 18+):**
+
+1. Na pasta `intermediario-nfe`, copie `config-exemplo.json` para `config.json` e preencha.
+2. Rode `node servidor.js` (fica escutando na porta 8787 da rede local).
+3. Nas Configurações do PAPTECH escolha "URL própria" e informe `http://IP-DO-COMPUTADOR:8787`.
+
+### Configurando
+
+1. Contrate a Focus NFe, cadastre a empresa e envie o **certificado digital A1** (.pfx) no painel dela.
+2. No PAPTECH, preencha **Configurações → Dados da Empresa** (CNPJ, IE, endereço completo).
+3. Em **Configurações → Nota Fiscal Eletrônica**: ambiente, intermediário, a chave do intermediário
+   (fica salva só no computador, digite em cada um), regime tributário e padrões fiscais. Clique em
+   **Testar conexão**.
+4. Nos produtos, preencha **NCM**, **CFOP**, **CST/CSOSN** e **Origem** (aba Impostos). Quando
+   vazios, CFOP e CST/CSOSN usam os padrões das Configurações. Para vendas a outro estado, o CFOP
+   5xxx vira 6xxx automaticamente.
+5. Emita algumas notas em **Homologação** (sem valor fiscal) e só então mude para **Produção**.
+
+> Confirme CST/CSOSN, CFOP e PIS/COFINS com o seu contador. O PAPTECH envia ICMS destacado para
+> CST 00 (Regime Normal) e os casos sem destaque (Simples 102/103/300/400/500; Normal 40/41/50/60).
+> Situações com ICMS-ST calculado na própria nota ou redução de base ainda não são montadas
+> automaticamente.
+
 ## Acesso inicial
 
 - **Usuário:** `admin`
@@ -75,7 +124,7 @@ depois do primeiro login.
 - Clientes, Fornecedores, Transportadoras
 - Produtos (com código interno, código original, códigos similares, controle de estoque)
 - Compras (pedido de compra, importação de XML de NF-e, entrada em estoque, contas a pagar)
-- Vendas (pedido de venda, nota fiscal de saída, baixa de estoque, contas a receber)
+- Vendas (pedido de venda, emissão de NF-e pela Focus NFe, baixa de estoque, contas a receber)
 - Contas a Pagar / Contas a Receber / Cobrança
 - Calendário Financeiro, Calculadora
 - Relatórios de Compras e Vendas (por comprador/vendedor, com impressão)
