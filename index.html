@@ -876,6 +876,15 @@ const CAMPOS_PESSOA = [
   ['email', 'E-mail'],
 ];
 
+/* Campos extras do cadastro de Cliente (não existem em Fornecedores/Transportadoras):
+   dados do comprador (quem faz o pedido do lado do cliente) e um e-mail específico para
+   receber o XML/DANFE da Nota Fiscal, quando é diferente do e-mail geral do cliente. */
+const CAMPOS_EXTRA_CLIENTE = [
+  ['comprador_nome', 'Nome do Comprador'],
+  ['comprador_telefone', 'Telefone/Número do Comprador'],
+  ['email_xml_nfe', 'E-mail para envio do XML da NF-e'],
+];
+
 const TITULOS_PESSOA = { clientes: 'Clientes', fornecedores: 'Fornecedores', transportadoras: 'Transportadoras' };
 const SINGULAR_PESSOA = { clientes: 'Cliente', fornecedores: 'Fornecedor', transportadoras: 'Transportadora' };
 
@@ -983,10 +992,24 @@ function abrirFormPessoa(tipo, id) {
     `;
   }).join('');
 
+  const camposExtraClienteHtml = tipo === 'clientes' ? `
+    <label style="font-size:12.5px;color:var(--texto-suave); margin-top:10px; display:block">Comprador / NF-e</label>
+    ${CAMPOS_EXTRA_CLIENTE.map(([chave, rotulo]) => {
+      const valor = registro ? (registro[chave] || '') : '';
+      return `
+        <div class="campo">
+          <label>${rotulo}</label>
+          <input type="text" id="campo-${chave}" value="${escapeHtml(valor)}">
+        </div>
+      `;
+    }).join('')}
+  ` : '';
+
   abrirModal(`
     <h2>${registro ? 'Editar' : 'Cadastrar'} ${singular}</h2>
     <form id="form-pessoa" onsubmit="return salvarPessoa(event, '${tipo}', ${id || 'null'})">
       ${camposHtml}
+      ${camposExtraClienteHtml}
       <div class="modal-botoes">
         <button type="submit" class="btn-primary">Salvar</button>
         <button type="button" class="btn-secondary" onclick="fecharModal()">Cancelar</button>
@@ -1028,6 +1051,11 @@ function salvarPessoa(event, tipo, id) {
   CAMPOS_PESSOA.forEach(([chave]) => {
     dados[chave] = document.getElementById('campo-' + chave).value.trim();
   });
+  if (tipo === 'clientes') {
+    CAMPOS_EXTRA_CLIENTE.forEach(([chave]) => {
+      dados[chave] = document.getElementById('campo-' + chave).value.trim();
+    });
+  }
   if (!dados.razao_social) {
     alert('Informe a Razão Social.');
     return false;
@@ -3542,7 +3570,8 @@ function montarNfeVenda(venda, opcoes) {
   if (docDest.length === 11) payload.cpf_destinatario = docDest; else payload.cnpj_destinatario = docDest;
   if (indicadorIe === 1) payload.inscricao_estadual_destinatario = somenteDigitos(ieDestBruta);
   if (somenteDigitos(c.telefone)) payload.telefone_destinatario = somenteDigitos(c.telefone);
-  if (String(c.email || '').includes('@')) payload.email_destinatario = String(c.email).trim();
+  const emailNfeCliente = String(c.email_xml_nfe || c.email || '').trim();
+  if (emailNfeCliente.includes('@')) payload.email_destinatario = emailNfeCliente;
 
   if (duplicatas) {
     payload.numero_fatura = String(venda.numero || venda.id);
