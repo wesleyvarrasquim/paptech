@@ -7588,6 +7588,75 @@ async function importarXmlParaCompraExistente(event, compraId) {
   }
 }
 
+function rotuloProdutoXml(p) {
+  return `${p.descricao || ''} (Cód: ${p.cod_interno || p.cod_original || '-'}) #${p.id}`;
+}
+
+/* Guarda o que já foi digitado na revisão do XML (para reabrir a tela depois de escolher um produto). */
+function capturarRevisaoXml() {
+  const t = importacaoXmlTemp;
+  if (!t) return;
+  const val = id => { const e = document.getElementById(id); return e ? e.value : null; };
+  const r = { qtd: [], margem: [], vinc: [], dupVenc: [], dupValor: [], prazos: val('imp-xml-prazos-manual') || '' };
+  t.itens.forEach((_, i) => { r.qtd[i] = val('imp-xml-qtd-' + i); r.margem[i] = val('imp-xml-margem-' + i); r.vinc[i] = val('imp-xml-vinc-' + i); });
+  t.duplicatas.forEach((_, i) => { r.dupVenc[i] = val('imp-xml-dup-venc-' + i); r.dupValor[i] = val('imp-xml-dup-valor-' + i); });
+  t.rascunho = r;
+}
+
+/* Tela de busca de produtos (por código, código de barras ou descrição) para um item do XML. */
+function abrirSeletorProdutoXml(idx) {
+  if (!importacaoXmlTemp) return;
+  capturarRevisaoXml();
+  const it = importacaoXmlTemp.itens[idx];
+  abrirModal(`
+    <h2>Escolher produto — item ${idx + 1}</h2>
+    <div class="info-cliente-caixa">
+      <div><strong>Na nota:</strong> ${escapeHtml(it.descricao)} <small>(Cód. na NF: ${escapeHtml(it.cod_original || '-')})</small></div>
+    </div>
+    <div class="campo">
+      <label>Buscar por código ou descrição</label>
+      <input type="text" id="imp-xml-busca" autocomplete="off" oninput="filtrarSeletorProdutoXml(${idx})">
+    </div>
+    <div id="imp-xml-busca-resultados" style="max-height:340px;overflow:auto"></div>
+    <div class="modal-botoes">
+      <button type="button" class="btn-secondary" onclick="escolherProdutoXml(${idx}, null)">Cadastrar como produto novo</button>
+      <button type="button" class="btn-secondary" onclick="abrirRevisaoImportacaoXml()">Voltar</button>
+    </div>
+  `);
+  const campo = document.getElementById('imp-xml-busca');
+  campo.value = it.cod_original || '';
+  campo.focus();
+  filtrarSeletorProdutoXml(idx);
+}
+
+function filtrarSeletorProdutoXml(idx) {
+  const termo = document.getElementById('imp-xml-busca').value.trim();
+  const alvo = document.getElementById('imp-xml-busca-resultados');
+  const todos = loadList('produtos');
+  const lista = (termo ? filtrarProdutosPorTermo(todos, termo) : todos).slice(0, 50);
+  alvo.innerHTML = lista.length ? `
+    <table class="data-table">
+      <thead><tr><th>Código</th><th>Descrição</th><th>Estoque</th><th></th></tr></thead>
+      <tbody>${lista.map(p => `
+        <tr>
+          <td>${escapeHtml(p.cod_interno || p.cod_original || '-')}</td>
+          <td>${escapeHtml(p.descricao)}</td>
+          <td>${Number(p.estoque_atual) || 0}</td>
+          <td><button type="button" class="btn-primary" onclick="escolherProdutoXml(${idx}, ${p.id})">Selecionar</button></td>
+        </tr>`).join('')}
+      </tbody>
+    </table>${todos.length > lista.length && !termo ? '<small>Mostrando os 50 primeiros — digite para filtrar.</small>' : ''}` : '<p class="vazio">Nenhum produto encontrado.</p>';
+}
+
+function escolherProdutoXml(idx, produtoId) {
+  const t = importacaoXmlTemp;
+  if (!t) return;
+  const produto = produtoId ? loadList('produtos').find(p => p.id === produtoId) : null;
+  if (!t.rascunho) capturarRevisaoXml();
+  t.rascunho.vinc[idx] = produto ? rotuloProdutoXml(produto) : '';
+  abrirRevisaoImportacaoXml();
+}
+
 /* Interpreta o texto do campo "Dar entrada em" da revisão do XML.
    Devolve o produto, null (vazio = cadastrar como novo) ou undefined (não achou). */
 function resolverProdutoRevisaoXml(texto, produtos) {
@@ -7616,7 +7685,9 @@ function abrirRevisaoImportacaoXml() {
     : `Revisar Importação de XML — NF ${escapeHtml(numeroNf || '(sem número)')}`;
   const textoBotaoConfirmar = 'Confirmar Importação';
 
-  const rotuloProduto = p => `${p.descricao || ''} (Cód: ${p.cod_interno || p.cod_original || '-'}) #${p.id}`;
+  const rotuloProduto = rotuloProdutoXml;
+  const rasc = importacaoXmlTemp.rascunho || null;
+  const rd = (lista, i, padrao) => (rasc && lista && lista[i] != null ? lista[i] : padrao);
   const opcoesProdutos = produtos.map(p => `<option value="${escapeHtml(rotuloProduto(p))}"></option>`).join('');
 
   const linhasItens = itens.map((it, idx) => {
@@ -7626,11 +7697,12 @@ function abrirRevisaoImportacaoXml() {
         <td>${escapeHtml(it.cod_original || '-')}</td>
         <td>${escapeHtml(it.descricao)}<br><small>${escapeHtml(it.unidade_medida)} · custo ${formatarMoeda(it.valor_unitario)}</small></td>
         <td>
-          <input type="text" id="imp-xml-vinc-${idx}" list="imp-xml-lista-produtos" value="${escapeHtml(produto ? rotuloProduto(produto) : '')}" placeholder="Vazio = cadastrar como produto novo" style="width:100%;min-width:220px" oninput="atualizarEstoqueRevisaoXml(${idx})">
-          <small id="imp-xml-estoque-${idx}"></small>
+          <input type="text" id="imp-xml-vinc-${idx}" list="imp-xml-lista-produtos" value="${escapeHtml(rd(rasc && rasc.vinc, idx, produto ? rotuloProduto(produto) : ''))}" placeholder="Vazio = cadastrar como produto novo" style="width:calc(100% - 38px);min-width:200px" oninput="atualizarEstoqueRevisaoXml(${idx})">
+          <button type="button" class="btn-secondary" style="padding:4px 8px" title="Buscar produto por código ou descrição" onclick="abrirSeletorProdutoXml(${idx})">🔍</button>
+          <br><small id="imp-xml-estoque-${idx}"></small>
         </td>
-        <td><input type="text" id="imp-xml-qtd-${idx}" value="${String(it.quantidade).replace('.', ',')}" style="width:70px"></td>
-        <td><input type="text" id="imp-xml-margem-${idx}" value="30" style="width:55px">%</td>
+        <td><input type="text" id="imp-xml-qtd-${idx}" value="${escapeHtml(rd(rasc && rasc.qtd, idx, String(it.quantidade).replace('.', ',')))}" style="width:70px"></td>
+        <td><input type="text" id="imp-xml-margem-${idx}" value="${escapeHtml(rd(rasc && rasc.margem, idx, '30'))}" style="width:55px">%</td>
       </tr>
     `;
   }).join('');
@@ -7659,8 +7731,8 @@ function abrirRevisaoImportacaoXml() {
           ${duplicatas.map((d, idx) => `
             <tr>
               <td>${escapeHtml(d.numero || String(idx + 1))}</td>
-              <td><input type="date" id="imp-xml-dup-venc-${idx}" value="${d.vencimento}"></td>
-              <td><input type="text" id="imp-xml-dup-valor-${idx}" value="${d.valor.toFixed(2).replace('.', ',')}" style="width:100px"></td>
+              <td><input type="date" id="imp-xml-dup-venc-${idx}" value="${escapeHtml(rd(rasc && rasc.dupVenc, idx, d.vencimento))}"></td>
+              <td><input type="text" id="imp-xml-dup-valor-${idx}" value="${escapeHtml(rd(rasc && rasc.dupValor, idx, d.valor.toFixed(2).replace('.', ',')))}" style="width:100px"></td>
             </tr>
           `).join('')}
         </tbody>
@@ -7668,7 +7740,7 @@ function abrirRevisaoImportacaoXml() {
     ` : `
       <div class="campo">
         <label>O XML não trouxe duplicatas (cobr/dup). Informe os prazos — dias separados por / (ex: 30/45/60, máximo 10x). Deixe em branco para à vista. Isso só é usado quando você clicar em "Dar Entrada".</label>
-        <input type="text" id="imp-xml-prazos-manual" placeholder="30/45/60">
+        <input type="text" id="imp-xml-prazos-manual" placeholder="30/45/60" value="${escapeHtml((rasc && rasc.prazos) || '')}">
       </div>
     `}
 
@@ -7677,6 +7749,7 @@ function abrirRevisaoImportacaoXml() {
       <button type="button" class="btn-secondary" onclick="importacaoXmlTemp = null; fecharModal();">Cancelar</button>
     </div>
   `);
+  itens.forEach((_, idx) => atualizarEstoqueRevisaoXml(idx));
 }
 
 function confirmarImportacaoXmlNfe() {
