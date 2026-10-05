@@ -23,8 +23,8 @@ const CORS = {
     "authorization, apikey, content-type, x-client-info, x-ambiente, x-paptech-chave",
 };
 
-// Só libera as rotas de NF-e (emitir, consultar, cancelar, carta de correção).
-const ROTA_PERMITIDA = /^\/v2\/nfe(\/[A-Za-z0-9_.-]+(\/carta_correcao)?)?$/;
+// Só libera as rotas de NF-e e NFC-e (emitir, consultar, cancelar, carta de correção).
+const ROTA_PERMITIDA = /^\/v2\/nfce?(\/[A-Za-z0-9_.-]+(\/carta_correcao)?)?$/;
 
 function json(status: number, dados: unknown) {
   return new Response(JSON.stringify(dados), {

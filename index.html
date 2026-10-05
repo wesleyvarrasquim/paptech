@@ -356,6 +356,7 @@
       <button class="nav-btn" data-section="transportadoras"><span class="icone">🚚</span>Transportadoras</button>
       <button class="nav-btn" data-section="produtos"><span class="icone">⚙️</span>Produtos</button>
       <button class="nav-btn" data-section="compras"><span class="icone">📦</span>Compras</button>
+      <button class="nav-btn" data-section="pdv"><span class="icone">🛒</span>Frente de Caixa</button>
       <button class="nav-btn" data-section="vendas"><span class="icone">🧾</span>Vendas</button>
       <button class="nav-btn" data-section="notas-fiscais"><span class="icone">📄</span>Notas Fiscais</button>
       <button class="nav-btn" data-section="contas-receber"><span class="icone">📥</span>Contas a Receber</button>
@@ -377,6 +378,7 @@
     <section id="sec-transportadoras" class="section" style="display:none"></section>
     <section id="sec-produtos" class="section" style="display:none"></section>
     <section id="sec-compras" class="section" style="display:none"></section>
+    <section id="sec-pdv" class="section" style="display:none"></section>
     <section id="sec-vendas" class="section" style="display:none"></section>
     <section id="sec-notas-fiscais" class="section" style="display:none"></section>
     <section id="sec-contas-receber" class="section" style="display:none"></section>
@@ -417,6 +419,7 @@ const STORAGE_KEYS = {
   vendedores: 'westech_vendedores',
   configuracoes: 'westech_configuracoes',
   usuarios: 'westech_usuarios',
+  caixas: 'westech_caixas',
 };
 
 /* Seções que podem ter acesso liberado/bloqueado por usuário.
@@ -428,6 +431,7 @@ const SECOES_PERMISSAO = [
   ['produtos', 'Produtos'],
   ['compras', 'Compras'],
   ['vendas', 'Vendas'],
+  ['pdv', 'Frente de Caixa'],
   ['notas-fiscais', 'Notas Fiscais'],
   ['contas-receber', 'Contas a Receber'],
   ['contas-pagar', 'Contas a Pagar'],
@@ -1121,6 +1125,7 @@ function renderSecao(secao) {
   else if (secao === 'transportadoras') renderPessoaSection('transportadoras');
   else if (secao === 'produtos') renderProdutos();
   else if (secao === 'compras') renderCompras();
+  else if (secao === 'pdv') renderPdv();
   else if (secao === 'vendas') renderVendas();
   else if (secao === 'notas-fiscais') renderNotasFiscais();
   else if (secao === 'contas-receber') renderContas('receber');
@@ -3249,7 +3254,7 @@ function renderVendas() {
     const recebimentoGerado = !!v.recebimento_gerado;
     return `
       <tr>
-        <td>${escapeHtml(cliente ? cliente.razao_social : 'Cliente não cadastrado')}</td>
+        <td>${escapeHtml(cliente ? cliente.razao_social : (v.origem === 'pdv' ? 'Consumidor Final (PDV)' : 'Cliente não cadastrado'))}</td>
         <td>${escapeHtml(v.numero)}</td>
         <td>${formatarDataBr(v.data_venda)}</td>
         <td>${escapeHtml(v.vendedor || '-')}</td>
@@ -4695,6 +4700,10 @@ function estornarRecebimentoVenda(vendaId) {
 }
 
 function abrirFormVendaManual(id) {
+  if (id && (loadList('vendas').find(v => v.id === id) || {}).origem === 'pdv') {
+    alert('Vendas da Frente de Caixa não são editadas aqui. Use "Vendas do caixa" → cancelar na Frente de Caixa.');
+    return;
+  }
   const vendaComNfe = id ? loadList('vendas').find(v => v.id === id) : null;
   if (vendaComNfe && vendaComNfe.nfe_ref && ['autorizado', 'processando_autorizacao'].includes(vendaComNfe.nfe_status_api)) {
     alert('Esta venda já tem NF-e autorizada (ou em processamento) e não pode ser alterada. Para corrigir textos use a Carta de Correção; para valores/itens, cancele a NF-e.');
@@ -5120,6 +5129,724 @@ function salvarVendaManual(id) {
   if (jaTinhaRecebimento) {
     alert('Venda atualizada. Como esta venda já tinha recebimento gerado, o estoque e as parcelas antigas foram revertidos — use "Emitir NFe" ou "Gerar Recebimento" para lançar os dados atualizados.');
   }
+}
+
+/* =========================================================
+   FRENTE DE CAIXA (PDV) — venda a consumidor final
+   Caixa com abertura/fechamento, sangria/suprimento, pagamentos
+   mistos com troco e emissão de NFC-e pela Focus NFe.
+   ========================================================= */
+
+const PDV_FORMAS = [
+  { chave: 'dinheiro', rotulo: 'Dinheiro', codigo: '01' },
+  { chave: 'pix', rotulo: 'PIX', codigo: '17' },
+  { chave: 'debito', rotulo: 'Cartão de Débito', codigo: '04' },
+  { chave: 'credito', rotulo: 'Cartão de Crédito', codigo: '03' },
+];
+let pdvCarrinho = [];
+let pdvDescontoTexto = '';
+let pdvCpf = '';
+let pdvEmitirNfce = true;
+let pdvResultados = [];
+
+function pdvCaixaAberto() {
+  return loadList('caixas').find(c => c.status === 'aberto') || null;
+}
+
+function pdvSubtotal() {
+  return arred2(pdvCarrinho.reduce((s, i) => s + (Number(i.quantidade) || 0) * (Number(i.valor_unitario) || 0), 0));
+}
+
+/* Aceita "10" / "10,50" (reais) ou "5%" (percentual). Nunca passa do subtotal. */
+function pdvParseDesconto(texto, subtotal) {
+  const t = String(texto || '').trim();
+  if (!t) return 0;
+  let valor;
+  if (t.endsWith('%')) valor = subtotal * (parseFloat(t.slice(0, -1).replace(',', '.')) || 0) / 100;
+  else valor = parseFloat(t.replace(/\./g, '').replace(',', '.')) || 0;
+  return Math.min(Math.max(arred2(valor), 0), subtotal);
+}
+
+function pdvDesconto() { return pdvParseDesconto(pdvDescontoTexto, pdvSubtotal()); }
+function pdvTotal() { return Math.max(0, arred2(pdvSubtotal() - pdvDesconto())); }
+
+/* pagamentos: { dinheiro, pix, debito, credito } (dinheiro = valor entregue pelo cliente). */
+function pdvCalcularPagamento(total, pagamentos) {
+  const v = k => Math.max(0, arred2(pagamentos[k]));
+  const dinheiro = v('dinheiro');
+  const outros = arred2(v('pix') + v('debito') + v('credito'));
+  const pago = arred2(dinheiro + outros);
+  const restante = Math.max(0, arred2(total - pago));
+  const troco = Math.max(0, arred2(pago - total));
+  const valido = total > 0 && pago >= total && outros <= total && troco <= dinheiro;
+  return { pago, restante, troco, valido };
+}
+
+/* Rateia o desconto entre os itens (o último leva a sobra), devolvendo itens de venda. */
+function pdvItensComDesconto(carrinho, desconto) {
+  const subtotal = arred2(carrinho.reduce((s, i) => s + i.quantidade * i.valor_unitario, 0));
+  let acumulado = 0;
+  return carrinho.map((i, idx) => {
+    const bruto = arred2(i.quantidade * i.valor_unitario);
+    const ultimo = idx === carrinho.length - 1;
+    const parte = ultimo ? arred2(desconto - acumulado) : arred2(subtotal ? desconto * bruto / subtotal : 0);
+    acumulado = arred2(acumulado + parte);
+    const liquido = arred2(bruto - parte);
+    return {
+      produto_id: i.produto_id,
+      descricao: i.descricao,
+      quantidade: i.quantidade,
+      valor_unitario: i.quantidade ? Number((liquido / i.quantidade).toFixed(4)) : 0,
+      valor_total: liquido,
+    };
+  });
+}
+
+function pdvResumoCaixa(caixa, vendas) {
+  const vs = vendas.filter(v => v.origem === 'pdv' && v.caixa_id === caixa.id && !v.cancelada_pdv);
+  const porForma = { dinheiro: 0, pix: 0, debito: 0, credito: 0 };
+  vs.forEach(v => (v.pagamentos || []).forEach(p => { if (p.forma in porForma) porForma[p.forma] = arred2(porForma[p.forma] + p.valor); }));
+  const movs = caixa.movimentos || [];
+  const soma = tipo => arred2(movs.filter(m => m.tipo === tipo).reduce((s, m) => s + (Number(m.valor) || 0), 0));
+  const suprimentos = soma('suprimento');
+  const sangrias = soma('sangria');
+  const totalVendas = arred2(vs.reduce((s, v) => s + (Number(v.valor_total) || 0), 0));
+  const esperadoDinheiro = arred2((Number(caixa.troco_inicial) || 0) + porForma.dinheiro + suprimentos - sangrias);
+  return { quantidade: vs.length, totalVendas, porForma, suprimentos, sangrias, esperadoDinheiro };
+}
+
+function pdvAgora() { return dataHoraLocalComFuso(); }
+function pdvFormatarDataHora(iso) {
+  if (!iso) return '-';
+  return formatarDataBr(String(iso).slice(0, 10)) + ' ' + String(iso).slice(11, 16);
+}
+
+/* ---------- tela principal ---------- */
+
+function renderPdv() {
+  const container = document.getElementById('sec-pdv');
+  const caixa = pdvCaixaAberto();
+  if (!caixa) {
+    container.innerHTML = `
+      <div class="section-header"><h2>🛒 Frente de Caixa</h2></div>
+      <div class="card" style="max-width:480px">
+        <h3 style="margin-top:0">Caixa fechado</h3>
+        <p>Abra o caixa para começar a vender ao consumidor final.</p>
+        <div class="form-group"><label>Troco inicial (R$)</label><input type="text" id="pdv-troco-inicial" value="0,00"></div>
+        <button class="btn-primary" onclick="pdvAbrirCaixa()">Abrir caixa</button>
+        <button class="btn-secondary" onclick="pdvAbrirHistoricoCaixas()">Caixas anteriores</button>
+      </div>`;
+    return;
+  }
+  const cfg = configNfe();
+  const nfceDisponivel = !!urlIntermediarioNfe(cfg);
+  container.innerHTML = `
+    <div class="section-header">
+      <h2>🛒 Frente de Caixa</h2>
+      <div>
+        <span style="margin-right:10px">Caixa #${caixa.id} aberto em ${pdvFormatarDataHora(caixa.aberto_em)} por ${escapeHtml(caixa.aberto_por || '-')}</span>
+        <button class="btn-secondary" onclick="pdvAbrirMovimento('suprimento')">+ Suprimento</button>
+        <button class="btn-secondary" onclick="pdvAbrirMovimento('sangria')">− Sangria</button>
+        <button class="btn-secondary" onclick="pdvAbrirVendasCaixa()">Vendas do caixa</button>
+        <button class="btn-danger" onclick="pdvAbrirFechamento()">Fechar caixa</button>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:minmax(260px,1fr) minmax(300px,1.3fr);gap:16px">
+      <div class="card">
+        <label><strong>Produto</strong> (código, código de barras ou nome — use <code>3*código</code> para quantidade)</label>
+        <input type="text" id="pdv-busca" autocomplete="off" placeholder="Digite e tecle Enter" oninput="pdvBuscar()" onkeydown="pdvTeclaBusca(event)" style="font-size:18px">
+        <div id="pdv-resultados" style="margin-top:8px"></div>
+      </div>
+      <div class="card">
+        <div id="pdv-carrinho"></div>
+        <div class="form-group" style="display:flex;gap:8px;margin-top:10px">
+          <div style="flex:1"><label>Desconto (R$ ou %)</label><input type="text" id="pdv-desconto" value="${escapeHtml(pdvDescontoTexto)}" oninput="pdvDescontoTexto=this.value;pdvAtualizarTotais()"></div>
+          <div style="flex:1"><label>CPF na nota (opcional)</label><input type="text" id="pdv-cpf" value="${escapeHtml(pdvCpf)}" oninput="pdvCpf=this.value" maxlength="14"></div>
+        </div>
+        <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="pdv-emitir-nfce" ${pdvEmitirNfce && nfceDisponivel ? 'checked' : ''} ${nfceDisponivel ? '' : 'disabled'} onchange="pdvEmitirNfce=this.checked"> Emitir NFC-e ${nfceDisponivel ? '' : '(configure em Configurações → Nota Fiscal Eletrônica)'}</label>
+        <div id="pdv-totais" style="font-size:22px;margin:10px 0"></div>
+        <button class="btn-primary" style="font-size:18px;padding:12px 18px" onclick="pdvAbrirPagamento()">Finalizar venda (F2)</button>
+        <button class="btn-secondary" onclick="pdvLimparCarrinho(true)">Limpar</button>
+      </div>
+    </div>
+    <div id="pdv-pendentes" class="card" style="margin-top:16px"></div>`;
+  pdvRenderCarrinho();
+  pdvRenderPendentes();
+  const busca = document.getElementById('pdv-busca');
+  if (busca) busca.focus();
+}
+
+function pdvAbrirCaixa() {
+  const troco = numeroBr(document.getElementById('pdv-troco-inicial').value);
+  if (troco < 0) { alert('Troco inicial inválido.'); return; }
+  const usuario = usuarioLogado();
+  const caixas = loadList('caixas');
+  if (caixas.some(c => c.status === 'aberto')) { renderPdv(); return; }
+  caixas.push({
+    id: nextId(caixas), status: 'aberto', aberto_em: pdvAgora(),
+    aberto_por: usuario ? usuario.nome : '', troco_inicial: arred2(troco), movimentos: [],
+  });
+  saveList('caixas', caixas);
+  renderPdv();
+}
+
+/* ---------- busca e carrinho ---------- */
+
+function pdvBuscar() {
+  const campo = document.getElementById('pdv-busca');
+  const alvo = document.getElementById('pdv-resultados');
+  if (!campo || !alvo) return;
+  const termo = campo.value.replace(/^\s*\d+([.,]\d+)?\s*\*/, '').trim();
+  if (!termo) { pdvResultados = []; alvo.innerHTML = ''; return; }
+  pdvResultados = filtrarProdutosPorTermo(loadList('produtos'), termo).slice(0, 8);
+  alvo.innerHTML = pdvResultados.map(p => `
+    <div class="pdv-resultado" style="padding:8px;border-bottom:1px solid #ddd;cursor:pointer" onclick="pdvAdicionarProduto(${p.id}, 1)">
+      <strong>${escapeHtml(p.descricao)}</strong> <small>${escapeHtml(p.cod_interno || '')}</small><br>
+      ${formatarMoeda(p.valor_venda)} · estoque: ${Number(p.estoque_atual) || 0}
+    </div>`).join('') || '<em>Nenhum produto encontrado.</em>';
+}
+
+function pdvTeclaBusca(ev) {
+  if (ev.key !== 'Enter') return;
+  ev.preventDefault();
+  const campo = document.getElementById('pdv-busca');
+  const bruto = campo.value.trim();
+  if (!bruto) return;
+  const m = bruto.match(/^\s*(\d+(?:[.,]\d+)?)\s*\*\s*(.*)$/);
+  const quantidade = m ? parseFloat(m[1].replace(',', '.')) : 1;
+  const termo = (m ? m[2] : bruto).trim();
+  const produtos = loadList('produtos');
+  const exato = produtos.find(p => termo && (somenteDigitos(p.gtin_venda) === termo || String(p.cod_interno || '').trim().toLowerCase() === termo.toLowerCase()));
+  const escolhido = exato || (pdvResultados.length ? pdvResultados[0] : null);
+  if (!escolhido) { alert('Produto não encontrado.'); return; }
+  pdvAdicionarProduto(escolhido.id, quantidade > 0 ? quantidade : 1);
+}
+
+function pdvAdicionarProduto(produtoId, quantidade) {
+  const produto = loadList('produtos').find(p => p.id === produtoId);
+  if (!produto) return;
+  const existente = pdvCarrinho.find(i => i.produto_id === produtoId);
+  if (existente) existente.quantidade = arred2(existente.quantidade + quantidade);
+  else pdvCarrinho.push({
+    produto_id: produto.id,
+    descricao: produto.descricao,
+    quantidade: quantidade,
+    valor_unitario: Number(produto.valor_venda) || 0,
+  });
+  const campo = document.getElementById('pdv-busca');
+  if (campo) { campo.value = ''; campo.focus(); }
+  pdvResultados = [];
+  const alvo = document.getElementById('pdv-resultados');
+  if (alvo) alvo.innerHTML = '';
+  pdvRenderCarrinho();
+}
+
+function pdvRenderCarrinho() {
+  const alvo = document.getElementById('pdv-carrinho');
+  if (!alvo) return;
+  if (!pdvCarrinho.length) {
+    alvo.innerHTML = '<p><em>Carrinho vazio. Leia o código de barras ou busque o produto.</em></p>';
+  } else {
+    alvo.innerHTML = `<table class="tabela" style="width:100%"><thead><tr><th>Item</th><th>Qtd</th><th>Unit.</th><th>Total</th><th></th></tr></thead><tbody>
+      ${pdvCarrinho.map((i, idx) => `<tr>
+        <td>${escapeHtml(i.descricao)}</td>
+        <td><input type="text" value="${String(i.quantidade).replace('.', ',')}" style="width:60px" onchange="pdvAlterarQuantidade(${idx}, this.value)"></td>
+        <td><input type="text" value="${i.valor_unitario.toFixed(2).replace('.', ',')}" style="width:80px" onchange="pdvAlterarPreco(${idx}, this.value)"></td>
+        <td>${formatarMoeda(arred2(i.quantidade * i.valor_unitario))}</td>
+        <td><button onclick="pdvRemoverItem(${idx})" title="Remover">✖</button></td>
+      </tr>`).join('')}</tbody></table>`;
+  }
+  pdvAtualizarTotais();
+}
+
+function pdvAtualizarTotais() {
+  const alvo = document.getElementById('pdv-totais');
+  if (!alvo) return;
+  const sub = pdvSubtotal();
+  const desc = pdvDesconto();
+  alvo.innerHTML = `Subtotal: ${formatarMoeda(sub)}${desc ? ` · Desconto: −${formatarMoeda(desc)}` : ''}<br><strong>TOTAL: ${formatarMoeda(pdvTotal())}</strong>`;
+}
+
+function pdvAlterarQuantidade(idx, texto) {
+  const q = parseFloat(String(texto).replace(',', '.'));
+  if (!(q > 0)) pdvCarrinho.splice(idx, 1); else pdvCarrinho[idx].quantidade = q;
+  pdvRenderCarrinho();
+}
+function pdvAlterarPreco(idx, texto) {
+  const v = numeroBr(texto);
+  if (v >= 0) pdvCarrinho[idx].valor_unitario = v;
+  pdvRenderCarrinho();
+}
+function pdvRemoverItem(idx) { pdvCarrinho.splice(idx, 1); pdvRenderCarrinho(); }
+function pdvLimparCarrinho(confirmar) {
+  if (confirmar && pdvCarrinho.length && !confirm('Limpar o carrinho?')) return;
+  pdvCarrinho = []; pdvDescontoTexto = ''; pdvCpf = '';
+  if (document.getElementById('sec-pdv') && document.getElementById('sec-pdv').style.display !== 'none') renderPdv();
+}
+
+document.addEventListener('keydown', ev => {
+  const sec = document.getElementById('sec-pdv');
+  if (ev.key === 'F2' && sec && sec.style.display !== 'none' && pdvCaixaAberto() && document.getElementById('modal-overlay').style.display !== 'flex') {
+    ev.preventDefault();
+    pdvAbrirPagamento();
+  }
+});
+
+/* ---------- pagamento ---------- */
+
+function pdvAbrirPagamento() {
+  if (!pdvCarrinho.length) { alert('Adicione ao menos um item.'); return; }
+  const cpf = somenteDigitos(pdvCpf);
+  if (cpf && cpf.length !== 11) { alert('CPF inválido: informe 11 dígitos ou deixe em branco.'); return; }
+  const total = pdvTotal();
+  if (!(total > 0)) { alert('O total da venda precisa ser maior que zero.'); return; }
+  abrirModal(`
+    <h3>Pagamento — ${formatarMoeda(total)}</h3>
+    ${PDV_FORMAS.map(f => `
+      <div class="form-group" style="display:flex;gap:8px;align-items:center">
+        <label style="width:150px">${f.rotulo}</label>
+        <input type="text" id="pdv-pg-${f.chave}" value="" placeholder="0,00" oninput="pdvAtualizarPagamento()" style="flex:1">
+        <button type="button" class="btn-secondary" onclick="pdvPreencherRestante('${f.chave}')">Restante</button>
+      </div>`).join('')}
+    <div id="pdv-pg-resumo" style="font-size:18px;margin:12px 0"></div>
+    <button class="btn-primary" id="pdv-pg-confirmar" onclick="pdvConfirmarVenda()">Confirmar venda</button>
+    <button class="btn-secondary" onclick="fecharModal()">Voltar</button>`);
+  pdvPreencherRestante('dinheiro', true);
+}
+
+function pdvLerPagamentos() {
+  const p = {};
+  PDV_FORMAS.forEach(f => { const el = document.getElementById('pdv-pg-' + f.chave); p[f.chave] = el ? numeroBr(el.value) : 0; });
+  return p;
+}
+
+function pdvPreencherRestante(chave, limparOutros) {
+  const total = pdvTotal();
+  const atual = pdvLerPagamentos();
+  atual[chave] = 0;
+  const calc = pdvCalcularPagamento(total, atual);
+  const campo = document.getElementById('pdv-pg-' + chave);
+  if (campo) {
+    campo.value = calc.restante > 0 ? calc.restante.toFixed(2).replace('.', ',') : '';
+    campo.focus(); campo.select();
+  }
+  pdvAtualizarPagamento();
+}
+
+function pdvAtualizarPagamento() {
+  const total = pdvTotal();
+  const calc = pdvCalcularPagamento(total, pdvLerPagamentos());
+  const resumo = document.getElementById('pdv-pg-resumo');
+  const botao = document.getElementById('pdv-pg-confirmar');
+  if (!resumo) return;
+  resumo.innerHTML = `Recebido: ${formatarMoeda(calc.pago)} · ` +
+    (calc.restante > 0 ? `<strong style="color:#c62828">Falta: ${formatarMoeda(calc.restante)}</strong>` : `<strong style="color:#2e7d32">Troco: ${formatarMoeda(calc.troco)}</strong>`) +
+    (calc.pago >= total && !calc.valido ? '<br><small style="color:#c62828">Troco só pode sair do dinheiro; cartão/PIX não podem passar do total.</small>' : '');
+  if (botao) botao.disabled = !calc.valido;
+}
+
+/* ---------- finalização ---------- */
+
+function pdvConfirmarVenda() {
+  const caixa = pdvCaixaAberto();
+  if (!caixa) { alert('O caixa não está aberto.'); return; }
+  const total = pdvTotal();
+  const entregue = pdvLerPagamentos();
+  const calc = pdvCalcularPagamento(total, entregue);
+  if (!calc.valido) return;
+
+  const pagamentos = [];
+  PDV_FORMAS.forEach(f => {
+    let valor = arred2(entregue[f.chave]);
+    if (f.chave === 'dinheiro') valor = arred2(valor - calc.troco);
+    if (valor > 0) pagamentos.push({ forma: f.chave, codigo: f.codigo, valor });
+  });
+
+  const usuario = usuarioLogado();
+  const vendas = loadList('vendas');
+  const id = nextId(vendas);
+  const itens = pdvItensComDesconto(pdvCarrinho, pdvDesconto());
+  const emitir = pdvEmitirNfce && !!urlIntermediarioNfe(configNfe());
+  const venda = {
+    id, origem: 'pdv', caixa_id: caixa.id, cliente_id: null,
+    numero: 'PDV-' + id, data_venda: dataHojeLocalIso(), hora_venda: pdvAgora(),
+    valor_total: total, desconto: pdvDesconto(), itens,
+    vendedor: usuario ? usuario.nome : '', pagamentos, troco: calc.troco,
+    cpf_consumidor: somenteDigitos(pdvCpf), prazos_pagamento: [0],
+    status_nf: 'Pendente', numero_nf: '', serie_nf: '', data_emissao_nf: '', chave_nfe: '',
+    nfce: emitir, recebimento_gerado: true,
+  };
+  vendas.push(venda);
+  saveList('vendas', vendas);
+  aplicarBaixaEstoqueVenda(itens);
+
+  pdvCarrinho = []; pdvDescontoTexto = ''; pdvCpf = '';
+  fecharModal();
+  renderPdv();
+  pdvMostrarConclusao(id, emitir);
+  if (emitir) pdvTransmitirNfce(id, true);
+}
+
+function pdvMostrarConclusao(vendaId, emitindo) {
+  const venda = loadList('vendas').find(v => v.id === vendaId);
+  if (!venda) return;
+  abrirModal(`
+    <h3>✅ Venda #${venda.id} concluída — ${formatarMoeda(venda.valor_total)}</h3>
+    ${venda.troco > 0 ? `<p style="font-size:22px"><strong>Troco: ${formatarMoeda(venda.troco)}</strong></p>` : ''}
+    <div id="pdv-status-nfce">${emitindo ? '⏳ Emitindo NFC-e...' : (venda.nfce ? '' : 'Venda sem NFC-e.')}</div>
+    <div style="margin-top:12px">
+      <button class="btn-primary" onclick="pdvImprimirCupom(${venda.id})">🖨️ Imprimir cupom</button>
+      <button class="btn-secondary" onclick="fecharModal()">Nova venda</button>
+    </div>`);
+}
+
+function pdvMostrarStatusNfce(texto, tipo) {
+  const alvo = document.getElementById('pdv-status-nfce');
+  if (alvo) alvo.innerHTML = `<div style="padding:8px;border-radius:6px;background:${tipo === 'erro' ? '#ffebee' : tipo === 'ok' ? '#e8f5e9' : '#e3f2fd'}">${escapeHtml(texto).replace(/\n/g, '<br>')}</div>`;
+}
+
+/* ---------- NFC-e (Focus NFe) ---------- */
+
+function montarNfceVenda(venda) {
+  const cfg = configNfe();
+  const empresa = dadosEmpresaAtuais();
+  const produtos = loadList('produtos');
+  const erros = [];
+  const regime = cfg.regime_tributario;
+  const simples = regime === '1' || regime === '2';
+  const cnpjEmitente = somenteDigitos(empresa.cnpj);
+  const ufEmitente = String(empresa.uf || '').trim().toUpperCase();
+  if (cnpjEmitente.length !== 14) erros.push('CNPJ da empresa inválido ou não preenchido (Configurações → Dados da Empresa).');
+  if (ufEmitente.length !== 2) erros.push('UF da empresa não preenchida.');
+  if (!somenteDigitos(empresa.inscricao_estadual)) erros.push('Inscrição Estadual da empresa não preenchida.');
+
+  const items = (venda.itens || []).map((it, i) => {
+    const produto = produtos.find(p => p.id === it.produto_id) || {};
+    const rotulo = `Item ${i + 1} (${it.descricao})`;
+    const ncm = somenteDigitos(produto.ncm);
+    if (ncm.length !== 8) erros.push(`${rotulo}: NCM não cadastrado ou inválido (8 dígitos) — ajuste no cadastro do produto.`);
+    const cstInfo = decomporCstProduto(produto.cst_csosn || cfg.icms_cst_padrao, regime);
+    const origemProduto = somenteDigitos(String(produto.origem || '').slice(0, 1));
+    const origem = origemProduto || cstInfo.origem || somenteDigitos(cfg.origem_padrao) || '0';
+    const cst = cstInfo.cst;
+    if (simples && cst.length !== 3) erros.push(`${rotulo}: no Simples Nacional use CSOSN de 3 dígitos (ex.: 102, 500).`);
+    if (!simples && cst.length !== 2) erros.push(`${rotulo}: no Regime Normal use CST de 2 dígitos.`);
+    const cfop = ajustarCfopDestino(produto.cfop || cfg.cfop_padrao, false);
+    if (cfop.length !== 4) erros.push(`${rotulo}: CFOP inválido.`);
+    const quantidade = Number(it.quantidade) || 0;
+    const bruto = arred2(it.valor_total);
+    const unit = quantidade ? bruto / quantidade : 0;
+    const unidade = (String(produto.unidade_medida || 'UN').trim().toUpperCase() || 'UN').slice(0, 6);
+    const gtin = somenteDigitos(produto.gtin_venda);
+    const gtinValido = [8, 12, 13, 14].includes(gtin.length) ? gtin : 'SEM GTIN';
+    const item = {
+      numero_item: i + 1,
+      codigo_produto: String(produto.cod_interno || it.produto_id || i + 1),
+      descricao: String(it.descricao || produto.descricao || '').slice(0, 120),
+      codigo_ncm: ncm, cfop,
+      unidade_comercial: unidade, quantidade_comercial: quantidade,
+      valor_unitario_comercial: Number(unit.toFixed(10)),
+      unidade_tributavel: unidade, quantidade_tributavel: quantidade,
+      valor_unitario_tributavel: Number(unit.toFixed(10)),
+      valor_bruto: bruto,
+      codigo_barras_comercial: gtinValido, codigo_barras_tributavel: gtinValido,
+      inclui_no_total: 1,
+      icms_origem: Number(origem), icms_situacao_tributaria: cst,
+    };
+    if (!simples && cst === '00') {
+      const aliq = Number(produto.aliquota_icms) || 0;
+      if (!aliq) erros.push(`${rotulo}: CST 00 exige alíquota de ICMS no cadastro do produto.`);
+      item.icms_modalidade_base_calculo = 3;
+      item.icms_base_calculo = bruto;
+      item.icms_aliquota = aliq;
+      item.icms_valor = arred2(bruto * aliq / 100);
+    }
+    [['pis', cfg.pis_cst_padrao, produto.aliquota_pis], ['cofins', cfg.cofins_cst_padrao, produto.aliquota_cofins]].forEach(([tributo, cstPadrao, aliquotaProduto]) => {
+      const cstTrib = somenteDigitos(cstPadrao).padStart(2, '0');
+      item[`${tributo}_situacao_tributaria`] = cstTrib;
+      const aliq = Number(aliquotaProduto) || 0;
+      if (['01', '02'].includes(cstTrib) || Number(cstTrib) >= 49) {
+        const base = ['01', '02'].includes(cstTrib) || aliq ? bruto : 0;
+        item[`${tributo}_base_calculo`] = base;
+        item[`${tributo}_aliquota_porcentual`] = aliq;
+        item[`${tributo}_valor`] = arred2(base * aliq / 100);
+      }
+    });
+    return item;
+  });
+  if (!items.length) erros.push('A venda não tem itens.');
+  const valorProdutos = arred2(items.reduce((s, it) => s + it.valor_bruto, 0));
+  const payload = {
+    natureza_operacao: 'VENDA AO CONSUMIDOR',
+    data_emissao: dataHoraLocalComFuso(),
+    tipo_documento: 1, finalidade_emissao: 1, consumidor_final: 1, presenca_comprador: 1,
+    local_destino: 1, modalidade_frete: 9,
+    cnpj_emitente: cnpjEmitente,
+    nome_emitente: empresa.razao_social || '',
+    nome_fantasia_emitente: empresa.nome_fantasia || '',
+    logradouro_emitente: empresa.endereco || '',
+    numero_emitente: empresa.numero || 'S/N',
+    bairro_emitente: empresa.bairro || '',
+    municipio_emitente: empresa.cidade || '',
+    uf_emitente: ufEmitente,
+    cep_emitente: somenteDigitos(empresa.cep),
+    inscricao_estadual_emitente: somenteDigitos(empresa.inscricao_estadual),
+    regime_tributario_emitente: Number(regime),
+    valor_produtos: valorProdutos, valor_desconto: 0, valor_total: valorProdutos,
+    formas_pagamento: (venda.pagamentos || []).map(p => ({ forma_pagamento: p.codigo, valor_pagamento: arred2(p.valor) })),
+    items,
+  };
+  if (arred2(valorProdutos) !== arred2(venda.valor_total)) erros.push('Total dos itens difere do total da venda.');
+  if (somenteDigitos(venda.cpf_consumidor).length === 11) payload.cpf_destinatario = somenteDigitos(venda.cpf_consumidor);
+  return { payload, erros };
+}
+
+/* Reenvia/consulta a NFC-e de uma venda do PDV. A venda já está gravada: se a nota falhar,
+   fica "Pendente" e pode ser reenviada depois (lista abaixo do caixa). */
+async function pdvTransmitirNfce(vendaId, noModal) {
+  const venda = loadList('vendas').find(v => v.id === vendaId);
+  if (!venda) return;
+  const cfg = configNfe();
+  const mostrar = (t, tipo) => { if (noModal) pdvMostrarStatusNfce(t, tipo); };
+  const { payload, erros } = montarNfceVenda(venda);
+  if (erros.length) {
+    atualizarVendaNfe(vendaId, { nfe_mensagem: erros.join(' | ') });
+    mostrar('NFC-e não enviada — corrija e reenvie depois:\n- ' + erros.join('\n- '), 'erro');
+    pdvRenderPendentes();
+    if (!noModal) alert('Corrija antes de enviar:\n\n- ' + erros.join('\n- '));
+    return;
+  }
+  const ref = venda.nfe_ref && ['erro_autorizacao', 'processando_autorizacao'].includes(venda.nfe_status_api) && venda.nfe_ambiente === cfg.ambiente
+    ? venda.nfe_ref : `paptech-pdv${venda.id}-${Date.now().toString(36)}`;
+  mostrar('⏳ Enviando NFC-e para a SEFAZ...', 'info');
+  try {
+    let retorno;
+    if (venda.nfe_ref === ref && venda.nfe_status_api === 'processando_autorizacao') {
+      retorno = (await chamarFocusNfe('GET', `/v2/nfce/${encodeURIComponent(ref)}`)).dados || {};
+    } else {
+      const { status, dados } = await chamarFocusNfe('POST', `/v2/nfce?ref=${encodeURIComponent(ref)}`, payload);
+      if (status >= 400 && !dados.status) {
+        const msg = mensagemErroFocus(dados, status);
+        atualizarVendaNfe(vendaId, { nfe_mensagem: msg });
+        mostrar('NFC-e não aceita (a venda foi salva e pode ser reenviada):\n' + msg, 'erro');
+        pdvRenderPendentes();
+        return;
+      }
+      atualizarVendaNfe(vendaId, { nfe_ref: ref, nfe_ambiente: cfg.ambiente, nfe_status_api: dados.status || 'processando_autorizacao', nfe_mensagem: '' });
+      retorno = dados;
+    }
+    for (let t = 0; t < 10 && (!retorno.status || retorno.status === 'processando_autorizacao'); t++) {
+      mostrar(`⏳ Aguardando a SEFAZ autorizar... (${t + 1})`, 'info');
+      await esperar(2000);
+      retorno = (await chamarFocusNfe('GET', `/v2/nfce/${encodeURIComponent(ref)}`)).dados || {};
+    }
+    const resultado = processarRetornoNfe(vendaId, retorno);
+    if (resultado === 'autorizado') {
+      atualizarVendaNfe(vendaId, {
+        nfce_qrcode_url: retorno.qrcode_url || '',
+        nfce_url_consulta: retorno.url_consulta_nf || '',
+      });
+      mostrar(`NFC-e autorizada! Nº ${retorno.numero || ''} série ${retorno.serie || ''}`, 'ok');
+    } else if (resultado === 'processando_autorizacao') {
+      mostrar('A SEFAZ ainda está processando. Use "Consultar" na lista de NFC-e pendentes em alguns minutos.', 'info');
+    } else {
+      mostrar(`${textoStatusApiNfe(retorno.status)}:\n${mensagemErroFocus(retorno, 200)}\n\nA venda foi salva; corrija e reenvie.`, 'erro');
+    }
+  } catch (erro) {
+    atualizarVendaNfe(vendaId, { nfe_mensagem: erro.message });
+    mostrar('Sem conexão com o emissor (a venda foi salva e a NFC-e pode ser reenviada depois):\n' + erro.message, 'erro');
+  }
+  renderSecaoAtualAposNfe();
+  pdvRenderPendentes();
+}
+
+function pdvRenderPendentes() {
+  const alvo = document.getElementById('pdv-pendentes');
+  if (!alvo) return;
+  const pend = loadList('vendas').filter(v => v.origem === 'pdv' && v.nfce && v.status_nf === 'Pendente' && !v.cancelada_pdv).slice(-10).reverse();
+  if (!pend.length) { alvo.innerHTML = '<strong>NFC-e pendentes:</strong> nenhuma.'; return; }
+  alvo.innerHTML = `<strong>NFC-e pendentes (${pend.length})</strong>
+    <table class="tabela" style="width:100%"><tbody>${pend.map(v => `<tr>
+      <td>#${v.id} · ${pdvFormatarDataHora(v.hora_venda)}</td><td>${formatarMoeda(v.valor_total)}</td>
+      <td><small>${escapeHtml(v.nfe_mensagem || v.nfe_status_api || 'não enviada')}</small></td>
+      <td><button onclick="pdvTransmitirNfce(${v.id}, false)">${v.nfe_status_api === 'processando_autorizacao' ? 'Consultar' : 'Reenviar'}</button></td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+/* ---------- cupom ---------- */
+
+function pdvAbrirImpressao(titulo, corpo) {
+  const w = window.open('', '_blank', 'width=420,height=700');
+  if (!w) { alert('O navegador bloqueou a janela de impressão. Libere pop-ups para este site.'); return; }
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(titulo)}</title>
+    <style>body{font-family:monospace;font-size:12px;width:300px;margin:8px auto}h3,h4{text-align:center;margin:4px 0}
+    table{width:100%;border-collapse:collapse}td{padding:1px 0}.d{text-align:right}hr{border:0;border-top:1px dashed #000}</style></head>
+    <body>${corpo}<script>window.onload=function(){window.print()}<\/script></body></html>`);
+  w.document.close();
+}
+
+function pdvImprimirCupom(vendaId) {
+  const v = loadList('vendas').find(x => x.id === vendaId);
+  if (!v) return;
+  const e = dadosEmpresaAtuais();
+  const rot = Object.fromEntries(PDV_FORMAS.map(f => [f.chave, f.rotulo]));
+  const nota = v.status_nf === 'Emitida'
+    ? `<p>NFC-e nº ${escapeHtml(v.numero_nf)} série ${escapeHtml(v.serie_nf)}<br>Chave: ${escapeHtml(v.chave_nfe)}${v.nfce_url_consulta ? `<br>Consulta: ${escapeHtml(v.nfce_url_consulta)}` : ''}</p>${v.nfce_qrcode_url ? `<p>QR Code: ${escapeHtml(v.nfce_qrcode_url)}</p>` : ''}`
+    : '<p><strong>SEM VALOR FISCAL</strong> (NFC-e não emitida)</p>';
+  pdvAbrirImpressao('Cupom ' + v.numero, `
+    <h3>${escapeHtml(e.nome_fantasia || e.razao_social || 'PAPTECH')}</h3>
+    <h4>${escapeHtml(e.razao_social || '')}${e.cnpj ? '<br>CNPJ ' + escapeHtml(e.cnpj) : ''}</h4><hr>
+    <div>Venda ${escapeHtml(v.numero)} · ${pdvFormatarDataHora(v.hora_venda)}<br>Operador: ${escapeHtml(v.vendedor || '-')}${v.cpf_consumidor ? '<br>CPF: ' + escapeHtml(v.cpf_consumidor) : ''}</div><hr>
+    <table>${(v.itens || []).map(i => `<tr><td colspan="2">${escapeHtml(i.descricao)}</td></tr><tr><td>${i.quantidade} x ${formatarMoeda(i.valor_unitario)}</td><td class="d">${formatarMoeda(i.valor_total)}</td></tr>`).join('')}</table><hr>
+    <table>${v.desconto ? `<tr><td>Desconto</td><td class="d">−${formatarMoeda(v.desconto)}</td></tr>` : ''}
+    <tr><td><strong>TOTAL</strong></td><td class="d"><strong>${formatarMoeda(v.valor_total)}</strong></td></tr>
+    ${(v.pagamentos || []).map(p => `<tr><td>${rot[p.forma] || p.forma}</td><td class="d">${formatarMoeda(p.valor)}</td></tr>`).join('')}
+    ${v.troco ? `<tr><td>Troco</td><td class="d">${formatarMoeda(v.troco)}</td></tr>` : ''}</table><hr>
+    ${nota}<h4>Obrigado, volte sempre!</h4>`);
+}
+
+/* ---------- sangria / suprimento ---------- */
+
+function pdvAbrirMovimento(tipo) {
+  abrirModal(`
+    <h3>${tipo === 'sangria' ? 'Sangria (retirada de dinheiro)' : 'Suprimento (entrada de dinheiro)'}</h3>
+    <div class="form-group"><label>Valor (R$)</label><input type="text" id="pdv-mov-valor"></div>
+    <div class="form-group"><label>Motivo</label><input type="text" id="pdv-mov-motivo"></div>
+    <button class="btn-primary" onclick="pdvSalvarMovimento('${tipo}')">Salvar</button>
+    <button class="btn-secondary" onclick="fecharModal()">Cancelar</button>`);
+}
+
+function pdvSalvarMovimento(tipo) {
+  const valor = arred2(numeroBr(document.getElementById('pdv-mov-valor').value));
+  if (!(valor > 0)) { alert('Informe um valor maior que zero.'); return; }
+  const caixas = loadList('caixas');
+  const caixa = caixas.find(c => c.status === 'aberto');
+  if (!caixa) return;
+  caixa.movimentos = caixa.movimentos || [];
+  caixa.movimentos.push({ tipo, valor, motivo: document.getElementById('pdv-mov-motivo').value.trim(), hora: pdvAgora() });
+  saveList('caixas', caixas);
+  fecharModal();
+  alert(tipo === 'sangria' ? 'Sangria registrada.' : 'Suprimento registrado.');
+}
+
+/* ---------- vendas do caixa / cancelamento ---------- */
+
+function pdvAbrirVendasCaixa() {
+  const caixa = pdvCaixaAberto();
+  if (!caixa) return;
+  const vs = loadList('vendas').filter(v => v.origem === 'pdv' && v.caixa_id === caixa.id).reverse();
+  abrirModal(`
+    <h3>Vendas do caixa #${caixa.id}</h3>
+    <table class="tabela" style="width:100%"><thead><tr><th>Nº</th><th>Hora</th><th>Total</th><th>NFC-e</th><th></th></tr></thead><tbody>
+    ${vs.map(v => `<tr><td>${escapeHtml(v.numero)}</td><td>${pdvFormatarDataHora(v.hora_venda)}</td><td>${formatarMoeda(v.valor_total)}</td>
+      <td>${v.cancelada_pdv ? 'Cancelada' : escapeHtml(v.status_nf)}</td>
+      <td><button onclick="pdvImprimirCupom(${v.id})" title="Cupom">🖨️</button>
+      ${!v.cancelada_pdv ? `<button onclick="pdvCancelarVenda(${v.id})" title="Cancelar venda">✖</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="5">Nenhuma venda ainda.</td></tr>'}
+    </tbody></table><button class="btn-secondary" onclick="fecharModal()">Fechar</button>`);
+}
+
+function pdvCancelarVenda(vendaId) {
+  const vendas = loadList('vendas');
+  const v = vendas.find(x => x.id === vendaId);
+  if (!v || v.cancelada_pdv) return;
+  if (v.status_nf === 'Emitida') {
+    alert('Esta venda já tem NFC-e autorizada. O cancelamento fiscal precisa ser feito no painel da Focus NFe (prazo da SEFAZ); depois ajuste aqui manualmente.');
+    return;
+  }
+  if (v.nfe_status_api === 'processando_autorizacao') { alert('A NFC-e ainda está em processamento. Consulte antes de cancelar.'); return; }
+  if (!confirm(`Cancelar a venda ${v.numero}? O estoque será devolvido e ela sairá do fechamento do caixa.`)) return;
+  reverterEstoqueVenda(v.itens || []);
+  v.cancelada_pdv = true;
+  v.status_nf = 'Cancelada';
+  saveList('vendas', vendas);
+  pdvAbrirVendasCaixa();
+  pdvRenderPendentes();
+}
+
+/* ---------- fechamento ---------- */
+
+function pdvAbrirFechamento() {
+  const caixa = pdvCaixaAberto();
+  if (!caixa) return;
+  const r = pdvResumoCaixa(caixa, loadList('vendas'));
+  const pend = loadList('vendas').filter(v => v.origem === 'pdv' && v.caixa_id === caixa.id && v.nfce && v.status_nf === 'Pendente' && !v.cancelada_pdv).length;
+  abrirModal(`
+    <h3>Fechar caixa #${caixa.id}</h3>
+    ${pend ? `<p style="color:#c62828">⚠ ${pend} venda(s) com NFC-e pendente. Você pode fechar mesmo assim e reenviar depois.</p>` : ''}
+    ${pdvTabelaResumoHtml(caixa, r)}
+    <div class="form-group"><label>Dinheiro contado na gaveta (R$)</label><input type="text" id="pdv-contado" oninput="pdvAtualizarDiferenca(${r.esperadoDinheiro})"></div>
+    <div id="pdv-diferenca" style="margin:6px 0"></div>
+    <button class="btn-danger" onclick="pdvConfirmarFechamento()">Fechar caixa e imprimir relatório</button>
+    <button class="btn-secondary" onclick="fecharModal()">Cancelar</button>`);
+}
+
+function pdvAtualizarDiferenca(esperado) {
+  const campo = document.getElementById('pdv-contado');
+  const alvo = document.getElementById('pdv-diferenca');
+  if (!campo.value.trim()) { alvo.innerHTML = ''; return; }
+  const dif = arred2(numeroBr(campo.value) - esperado);
+  alvo.innerHTML = dif === 0 ? '✔ Caixa confere.' : `<strong style="color:#c62828">Diferença: ${dif > 0 ? 'sobra' : 'falta'} de ${formatarMoeda(Math.abs(dif))}</strong>`;
+}
+
+function pdvTabelaResumoHtml(caixa, r) {
+  const rot = Object.fromEntries(PDV_FORMAS.map(f => [f.chave, f.rotulo]));
+  return `<table class="tabela" style="width:100%"><tbody>
+    <tr><td>Troco inicial</td><td class="d">${formatarMoeda(caixa.troco_inicial)}</td></tr>
+    <tr><td>Vendas (${r.quantidade})</td><td class="d"><strong>${formatarMoeda(r.totalVendas)}</strong></td></tr>
+    ${PDV_FORMAS.map(f => `<tr><td>&nbsp;&nbsp;${rot[f.chave]}</td><td class="d">${formatarMoeda(r.porForma[f.chave])}</td></tr>`).join('')}
+    <tr><td>Suprimentos</td><td class="d">${formatarMoeda(r.suprimentos)}</td></tr>
+    <tr><td>Sangrias</td><td class="d">−${formatarMoeda(r.sangrias)}</td></tr>
+    <tr><td><strong>Dinheiro esperado na gaveta</strong></td><td class="d"><strong>${formatarMoeda(r.esperadoDinheiro)}</strong></td></tr>
+  </tbody></table>`;
+}
+
+function pdvConfirmarFechamento() {
+  const campo = document.getElementById('pdv-contado');
+  if (!campo.value.trim()) { alert('Informe o dinheiro contado na gaveta.'); return; }
+  const caixas = loadList('caixas');
+  const caixa = caixas.find(c => c.status === 'aberto');
+  if (!caixa) return;
+  const r = pdvResumoCaixa(caixa, loadList('vendas'));
+  const contado = arred2(numeroBr(campo.value));
+  caixa.status = 'fechado';
+  caixa.fechado_em = pdvAgora();
+  caixa.fechado_por = (usuarioLogado() || {}).nome || '';
+  caixa.dinheiro_contado = contado;
+  caixa.diferenca = arred2(contado - r.esperadoDinheiro);
+  caixa.resumo = r;
+  saveList('caixas', caixas);
+  pdvCarrinho = []; pdvDescontoTexto = ''; pdvCpf = '';
+  fecharModal();
+  renderPdv();
+  pdvImprimirRelatorioCaixa(caixa.id);
+}
+
+function pdvImprimirRelatorioCaixa(caixaId) {
+  const caixa = loadList('caixas').find(c => c.id === caixaId);
+  if (!caixa) return;
+  const r = caixa.resumo || pdvResumoCaixa(caixa, loadList('vendas'));
+  const e = dadosEmpresaAtuais();
+  const movs = (caixa.movimentos || []).map(m => `<tr><td>${m.tipo === 'sangria' ? 'Sangria' : 'Suprimento'} ${escapeHtml(m.motivo || '')}</td><td class="d">${formatarMoeda(m.valor)}</td></tr>`).join('');
+  pdvAbrirImpressao('Fechamento de caixa #' + caixa.id, `
+    <h3>${escapeHtml(e.nome_fantasia || e.razao_social || 'PAPTECH')}</h3>
+    <h4>FECHAMENTO DE CAIXA #${caixa.id}</h4><hr>
+    <div>Abertura: ${pdvFormatarDataHora(caixa.aberto_em)} (${escapeHtml(caixa.aberto_por || '-')})<br>
+    Fechamento: ${pdvFormatarDataHora(caixa.fechado_em)} (${escapeHtml(caixa.fechado_por || '-')})</div><hr>
+    ${pdvTabelaResumoHtml(caixa, r)}
+    ${movs ? `<hr><strong>Movimentos</strong><table>${movs}</table>` : ''}<hr>
+    <table><tr><td>Dinheiro contado</td><td class="d">${formatarMoeda(caixa.dinheiro_contado)}</td></tr>
+    <tr><td><strong>Diferença</strong></td><td class="d"><strong>${formatarMoeda(caixa.diferenca)}</strong></td></tr></table>`);
+}
+
+function pdvAbrirHistoricoCaixas() {
+  const fechados = loadList('caixas').filter(c => c.status === 'fechado').reverse();
+  abrirModal(`
+    <h3>Caixas anteriores</h3>
+    <table class="tabela" style="width:100%"><thead><tr><th>#</th><th>Abertura</th><th>Fechamento</th><th>Vendas</th><th>Diferença</th><th></th></tr></thead><tbody>
+    ${fechados.map(c => `<tr><td>${c.id}</td><td>${pdvFormatarDataHora(c.aberto_em)}</td><td>${pdvFormatarDataHora(c.fechado_em)}</td>
+      <td>${formatarMoeda((c.resumo || {}).totalVendas)}</td><td>${formatarMoeda(c.diferenca)}</td>
+      <td><button onclick="pdvImprimirRelatorioCaixa(${c.id})">🖨️</button></td></tr>`).join('') || '<tr><td colspan="6">Nenhum caixa fechado ainda.</td></tr>'}
+    </tbody></table><button class="btn-secondary" onclick="fecharModal()">Fechar</button>`);
 }
 
 function reverterEstoqueVenda(itens) {

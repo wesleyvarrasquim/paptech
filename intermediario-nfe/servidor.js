@@ -36,7 +36,7 @@ const BASES = {
   producao: opcao('FOCUS_BASE_PRODUCAO', 'https://api.focusnfe.com.br'),
 };
 
-const ROTA_PERMITIDA = /^\/v2\/nfe(\/[A-Za-z0-9_.-]+(\/carta_correcao)?)?$/;
+const ROTA_PERMITIDA = /^\/v2\/nfce?(\/[A-Za-z0-9_.-]+(\/carta_correcao)?)?$/;
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
