@@ -417,6 +417,7 @@ const STORAGE_KEYS = {
   contas_pagar: 'westech_contas_pagar',
   movimentos_estoque: 'westech_movimentos_estoque',
   vendedores: 'westech_vendedores',
+  compradores: 'westech_compradores',
   configuracoes: 'westech_configuracoes',
   usuarios: 'westech_usuarios',
   caixas: 'westech_caixas',
@@ -2623,7 +2624,10 @@ function abrirFormCompraManual(id) {
       </div>
       <div class="campo">
         <label>Comprador</label>
-        <input type="text" id="compra-comprador" placeholder="Nome de quem está comprando" value="${escapeHtml(registro ? (registro.comprador || '') : '')}">
+        <input type="text" id="compra-comprador" list="lista-compradores-cadastrados" placeholder="Nome de quem está comprando" value="${escapeHtml(registro ? (registro.comprador || '') : '')}">
+        <datalist id="lista-compradores-cadastrados">
+          ${loadList('compradores').filter(c => c.status !== 'Inativo').map(c => `<option value="${escapeHtml(c.nome)}"></option>`).join('')}
+        </datalist>
       </div>
       <div class="campo">
         <label>Número do Pedido / NF</label>
@@ -6967,6 +6971,7 @@ function aplicarMarcaDaguaNaTela() {
 function renderConfiguracoes() {
   const container = document.getElementById('sec-configuracoes');
   const vendedores = loadList('vendedores');
+  const compradores = loadList('compradores');
   const config = obterConfiguracoes();
   const usuarioAtual = usuarioLogado();
   const ehAdministrador = !!(usuarioAtual && usuarioAtual.nivel === 'Administrador');
@@ -6980,6 +6985,19 @@ function renderConfiguracoes() {
       <td class="acoes">
         <button onclick="abrirFormVendedor(${v.id})" title="Editar">&#9998;</button>
         <button onclick="excluirVendedor(${v.id})" title="Excluir">&#128465;</button>
+      </td>
+    </tr>
+  `).join('');
+
+  const linhasCompradores = compradores.map(c => `
+    <tr>
+      <td>${escapeHtml(c.nome)}</td>
+      <td>${escapeHtml(c.telefone || '-')}</td>
+      <td>${escapeHtml(c.email || '-')}</td>
+      <td><span class="status-badge ${c.status === 'Inativo' ? 'status-vencido' : 'status-pago'}">${escapeHtml(c.status || 'Ativo')}</span></td>
+      <td class="acoes">
+        <button onclick="abrirFormComprador(${c.id})" title="Editar">&#9998;</button>
+        <button onclick="excluirComprador(${c.id})" title="Excluir">&#128465;</button>
       </td>
     </tr>
   `).join('');
@@ -7034,6 +7052,17 @@ function renderConfiguracoes() {
     <table class="data-table">
       <thead><tr><th>Nome</th><th>Telefone</th><th>Comissão</th><th>Status</th><th></th></tr></thead>
       <tbody>${linhasVendedores || '<tr><td colspan="5" class="vazio">Nenhum vendedor cadastrado.</td></tr>'}</tbody>
+    </table>
+
+    <h2 style="margin-top:28px">Compradores</h2>
+    <div class="aviso">Quem faz as compras da empresa. Os nomes cadastrados aparecem como sugestão no campo "Comprador" em Compras.</div>
+    <div class="section-header">
+      <div></div>
+      <button class="btn-primary" onclick="abrirFormComprador()">+ Cadastrar Comprador</button>
+    </div>
+    <table class="data-table">
+      <thead><tr><th>Nome</th><th>Telefone</th><th>E-mail</th><th>Status</th><th></th></tr></thead>
+      <tbody>${linhasCompradores || '<tr><td colspan="5" class="vazio">Nenhum comprador cadastrado.</td></tr>'}</tbody>
     </table>
 
     <h2 style="margin-top:28px">Dados da Empresa</h2>
@@ -7191,6 +7220,71 @@ function salvarVendedor(event, id) {
 function excluirVendedor(id) {
   if (!confirm('Deseja realmente excluir este vendedor?')) return;
   saveList('vendedores', loadList('vendedores').filter(v => v.id !== id));
+  renderConfiguracoes();
+}
+
+function abrirFormComprador(id) {
+  const registro = id ? loadList('compradores').find(c => c.id === id) : null;
+  abrirModal(`
+    <h2>${registro ? 'Editar' : 'Cadastrar'} Comprador</h2>
+    <form onsubmit="return salvarComprador(event, ${id || 'null'})">
+      <div class="campo">
+        <label>Nome *</label>
+        <input type="text" id="comprador-nome" value="${escapeHtml(registro ? registro.nome : '')}" required>
+      </div>
+      <div class="campo">
+        <label>Telefone</label>
+        <input type="text" id="comprador-telefone" value="${escapeHtml(registro ? (registro.telefone || '') : '')}">
+      </div>
+      <div class="campo">
+        <label>E-mail</label>
+        <input type="text" id="comprador-email" value="${escapeHtml(registro ? (registro.email || '') : '')}">
+      </div>
+      <div class="campo">
+        <label>Status</label>
+        <select id="comprador-status">
+          <option value="Ativo" ${!registro || registro.status !== 'Inativo' ? 'selected' : ''}>Ativo</option>
+          <option value="Inativo" ${registro && registro.status === 'Inativo' ? 'selected' : ''}>Inativo</option>
+        </select>
+      </div>
+      <div class="modal-botoes">
+        <button type="submit" class="btn-primary">Salvar</button>
+        <button type="button" class="btn-secondary" onclick="fecharModal()">Cancelar</button>
+      </div>
+    </form>
+  `);
+}
+
+function salvarComprador(event, id) {
+  event.preventDefault();
+  const nome = document.getElementById('comprador-nome').value.trim();
+  if (!nome) {
+    alert('Informe o nome do comprador.');
+    return false;
+  }
+  const dados = {
+    nome: nome,
+    telefone: document.getElementById('comprador-telefone').value.trim(),
+    email: document.getElementById('comprador-email').value.trim(),
+    status: document.getElementById('comprador-status').value,
+  };
+  const lista = loadList('compradores');
+  if (id) {
+    const idx = lista.findIndex(c => c.id === id);
+    lista[idx] = { ...lista[idx], ...dados };
+  } else {
+    dados.id = nextId(lista);
+    lista.push(dados);
+  }
+  saveList('compradores', lista);
+  fecharModal();
+  renderConfiguracoes();
+  return false;
+}
+
+function excluirComprador(id) {
+  if (!confirm('Deseja realmente excluir este comprador?')) return;
+  saveList('compradores', loadList('compradores').filter(c => c.id !== id));
   renderConfiguracoes();
 }
 
