@@ -7588,6 +7588,25 @@ async function importarXmlParaCompraExistente(event, compraId) {
   }
 }
 
+/* Interpreta o texto do campo "Dar entrada em" da revisão do XML.
+   Devolve o produto, null (vazio = cadastrar como novo) ou undefined (não achou). */
+function resolverProdutoRevisaoXml(texto, produtos) {
+  const t = String(texto || '').trim();
+  if (!t) return null;
+  const m = t.match(/#(\d+)\s*$/);
+  if (m) return produtos.find(p => p.id === Number(m[1])) || undefined;
+  const exatos = produtos.filter(p => [p.cod_interno, p.cod_original].some(c => c && String(c).trim().toLowerCase() === t.toLowerCase()));
+  return exatos.length === 1 ? exatos[0] : undefined;
+}
+
+function atualizarEstoqueRevisaoXml(idx) {
+  const campo = document.getElementById('imp-xml-vinc-' + idx);
+  const alvo = document.getElementById('imp-xml-estoque-' + idx);
+  if (!campo || !alvo) return;
+  const produto = resolverProdutoRevisaoXml(campo.value, loadList('produtos'));
+  alvo.textContent = produto ? `Estoque atual: ${Number(produto.estoque_atual) || 0}` : (String(campo.value).trim() ? '' : 'Será cadastrado como produto novo');
+}
+
 function abrirRevisaoImportacaoXml() {
   if (!importacaoXmlTemp) return;
   const { fornecedorDados, numeroNf, duplicatas, itens, compraIdExistente } = importacaoXmlTemp;
@@ -7597,29 +7616,21 @@ function abrirRevisaoImportacaoXml() {
     : `Revisar Importação de XML — NF ${escapeHtml(numeroNf || '(sem número)')}`;
   const textoBotaoConfirmar = 'Confirmar Importação';
 
-  const itensNovos = itens.filter(it => !it.produto_id);
-  const itensExistentes = itens.filter(it => it.produto_id);
+  const rotuloProduto = p => `${p.descricao || ''} (Cód: ${p.cod_interno || p.cod_original || '-'}) #${p.id}`;
+  const opcoesProdutos = produtos.map(p => `<option value="${escapeHtml(rotuloProduto(p))}"></option>`).join('');
 
-  const linhasNovos = itensNovos.map((it, idx) => `
-    <tr>
-      <td>${escapeHtml(it.cod_original || '-')}</td>
-      <td>${escapeHtml(it.descricao)}</td>
-      <td>${escapeHtml(it.unidade_medida)}</td>
-      <td><input type="text" id="imp-xml-qtd-novo-${idx}" value="${String(it.quantidade).replace('.', ',')}" style="width:70px"></td>
-      <td>${formatarMoeda(it.valor_unitario)}</td>
-      <td><input type="text" id="imp-xml-margem-novo-${idx}" value="30" style="width:60px">%</td>
-    </tr>
-  `).join('');
-
-  const linhasExistentes = itensExistentes.map((it, idx) => {
-    const produto = produtos.find(p => p.id === it.produto_id);
-    const estoqueAtual = produto ? (Number(produto.estoque_atual) || 0) : 0;
+  const linhasItens = itens.map((it, idx) => {
+    const produto = it.produto_id ? produtos.find(p => p.id === it.produto_id) : null;
     return `
       <tr>
-        <td>${escapeHtml(produto ? produto.descricao : it.descricao)} <small>(Cód: ${escapeHtml(produto ? (produto.cod_interno || produto.cod_original || '-') : '-')})</small></td>
-        <td>${estoqueAtual}</td>
-        <td><input type="text" id="imp-xml-qtd-existente-${idx}" value="${String(it.quantidade).replace('.', ',')}" style="width:70px"></td>
-        <td>${formatarMoeda(it.valor_unitario)}</td>
+        <td>${escapeHtml(it.cod_original || '-')}</td>
+        <td>${escapeHtml(it.descricao)}<br><small>${escapeHtml(it.unidade_medida)} · custo ${formatarMoeda(it.valor_unitario)}</small></td>
+        <td>
+          <input type="text" id="imp-xml-vinc-${idx}" list="imp-xml-lista-produtos" value="${escapeHtml(produto ? rotuloProduto(produto) : '')}" placeholder="Vazio = cadastrar como produto novo" style="width:100%;min-width:220px" oninput="atualizarEstoqueRevisaoXml(${idx})">
+          <small id="imp-xml-estoque-${idx}"></small>
+        </td>
+        <td><input type="text" id="imp-xml-qtd-${idx}" value="${String(it.quantidade).replace('.', ',')}" style="width:70px"></td>
+        <td><input type="text" id="imp-xml-margem-${idx}" value="30" style="width:55px">%</td>
       </tr>
     `;
   }).join('');
@@ -7631,21 +7642,13 @@ function abrirRevisaoImportacaoXml() {
       <div>${fornecedorDados.cnpj ? 'Se já existir fornecedor com este CNPJ, ele será reaproveitado; caso contrário, será cadastrado automaticamente.' : 'Fornecedor sem CNPJ identificado — será cadastrado mesmo assim.'}</div>
     </div>
 
-    ${itensNovos.length ? `
-      <h3 style="margin-top:16px">Itens não cadastrados — serão cadastrados automaticamente</h3>
-      <table class="data-table">
-        <thead><tr><th>Cód. Original</th><th>Descrição</th><th>Unid.</th><th>Qtd.</th><th>Custo Unit.</th><th>Margem</th></tr></thead>
-        <tbody>${linhasNovos}</tbody>
-      </table>
-    ` : ''}
-
-    ${itensExistentes.length ? `
-      <h3 style="margin-top:16px">Itens já cadastrados — quantidade será somada ao estoque</h3>
-      <table class="data-table">
-        <thead><tr><th>Produto</th><th>Estoque Atual</th><th>Qtd. a Adicionar</th><th>Custo Unit.</th></tr></thead>
-        <tbody>${linhasExistentes}</tbody>
-      </table>
-    ` : ''}
+    <h3 style="margin-top:16px">Itens da nota — escolha em qual produto dar entrada</h3>
+    <div class="aviso">A coluna "Dar entrada em" já vem preenchida quando o sistema reconheceu o produto pelo código. Você pode trocá-la digitando o código ou o nome de outro produto já cadastrado (o código do fornecedor fica memorizado como similar para as próximas importações). Deixando em branco, o item é cadastrado como produto novo (usa a margem).</div>
+    <datalist id="imp-xml-lista-produtos">${opcoesProdutos}</datalist>
+    <table class="data-table">
+      <thead><tr><th>Cód. na NF</th><th>Descrição na NF</th><th>Dar entrada em (produto cadastrado)</th><th>Qtd.</th><th>Margem (só novos)</th></tr></thead>
+      <tbody>${linhasItens}</tbody>
+    </table>
 
     <h3 style="margin-top:16px">Condição de Pagamento</h3>
     ${duplicatas.length ? `
@@ -7680,8 +7683,18 @@ function confirmarImportacaoXmlNfe() {
   if (!importacaoXmlTemp) return;
   const { fornecedorDados, numeroNf, chave, dataEmissao, duplicatas, itens, compraIdExistente } = importacaoXmlTemp;
 
-  const itensNovos = itens.filter(it => !it.produto_id);
-  const itensExistentes = itens.filter(it => it.produto_id);
+  // Lê, para cada item, o produto escolhido na tela (vazio = cadastrar como produto novo).
+  const produtos = loadList('produtos');
+  const escolhas = [];
+  for (let idx = 0; idx < itens.length; idx++) {
+    const campo = document.getElementById('imp-xml-vinc-' + idx);
+    const resolvido = resolverProdutoRevisaoXml(campo ? campo.value : '', produtos);
+    if (resolvido === undefined) {
+      alert(`Item ${idx + 1} (${itens[idx].descricao}): produto não encontrado em "Dar entrada em". Escolha um da lista ou apague o campo para cadastrar como produto novo.`);
+      return;
+    }
+    escolhas.push(resolvido);
+  }
 
   const fornecedores = loadList('fornecedores');
   let fornecedor = fornecedorDados.cnpj
@@ -7693,42 +7706,48 @@ function confirmarImportacaoXmlNfe() {
     saveList('fornecedores', fornecedores);
   }
 
-  const produtos = loadList('produtos');
-
-  // Itens novos: le quantidade/margem ajustadas na tela e cadastra automaticamente o produto.
-  itensNovos.forEach((it, idx) => {
-    const quantidade = numeroBr(document.getElementById('imp-xml-qtd-novo-' + idx).value) || it.quantidade;
-    const margem = numeroBr(document.getElementById('imp-xml-margem-novo-' + idx).value) || 0;
-    const custoReal = it.valor_unitario;
-    const novoProduto = {
-      id: nextId(produtos),
-      cod_interno: it.cod_original || '',
-      cod_original: it.cod_original || '',
-      similares: [],
-      gtin_venda: '', gtin_compra: '', fabricante: '', marca: '',
-      descricao: it.descricao,
-      aplicacao: '',
-      unidade_medida: it.unidade_medida || 'UN',
-      peso: 0,
-      grupo: '', localizacao: '',
-      status: 'Ativo',
-      tipo_produto: 'Revenda',
-      observacao: 'Cadastrado automaticamente a partir de importação de XML de NF-e.',
-      informacao_adicional: '',
-      valor_custo: custoReal,
-      margem_lucro: margem,
-      valor_venda: custoReal * (1 + margem / 100),
-      estoque_atual: 0,
-    };
-    produtos.push(novoProduto);
-    it.produto_id = novoProduto.id;
-    it.quantidade = quantidade;
-    it.valor_total = quantidade * it.valor_unitario;
-  });
-
-  // Itens já cadastrados: le a quantidade ajustada na tela (quantidade que sera somada ao estoque).
-  itensExistentes.forEach((it, idx) => {
-    const quantidade = numeroBr(document.getElementById('imp-xml-qtd-existente-' + idx).value) || it.quantidade;
+  let totalCadastrados = 0;
+  itens.forEach((it, idx) => {
+    const quantidade = numeroBr(document.getElementById('imp-xml-qtd-' + idx).value) || it.quantidade;
+    const escolhido = escolhas[idx];
+    if (escolhido) {
+      // Produto já cadastrado: se o usuário trocou o produto (ou o sistema não tinha reconhecido),
+      // memoriza o código do fornecedor como similar para reconhecer sozinho nas próximas notas.
+      if (escolhido.id !== it.produto_id && it.cod_original) {
+        const jaConhecido = [escolhido.cod_original, escolhido.cod_interno, ...codigosSimilares(escolhido)].includes(it.cod_original);
+        if (!jaConhecido) {
+          escolhido.similares = Array.isArray(escolhido.similares) ? escolhido.similares : [];
+          escolhido.similares.push(it.cod_original);
+        }
+      }
+      it.produto_id = escolhido.id;
+    } else {
+      const margem = numeroBr(document.getElementById('imp-xml-margem-' + idx).value) || 0;
+      const custoReal = it.valor_unitario;
+      const novoProduto = {
+        id: nextId(produtos),
+        cod_interno: it.cod_original || '',
+        cod_original: it.cod_original || '',
+        similares: [],
+        gtin_venda: '', gtin_compra: '', fabricante: '', marca: '',
+        descricao: it.descricao,
+        aplicacao: '',
+        unidade_medida: it.unidade_medida || 'UN',
+        peso: 0,
+        grupo: '', localizacao: '',
+        status: 'Ativo',
+        tipo_produto: 'Revenda',
+        observacao: 'Cadastrado automaticamente a partir de importação de XML de NF-e.',
+        informacao_adicional: '',
+        valor_custo: custoReal,
+        margem_lucro: margem,
+        valor_venda: custoReal * (1 + margem / 100),
+        estoque_atual: 0,
+      };
+      produtos.push(novoProduto);
+      it.produto_id = novoProduto.id;
+      totalCadastrados++;
+    }
     it.quantidade = quantidade;
     it.valor_total = quantidade * it.valor_unitario;
   });
@@ -7760,7 +7779,6 @@ function confirmarImportacaoXmlNfe() {
   }
 
   const compras = loadList('compras');
-  const totalCadastrados = itensNovos.length;
 
   if (compraIdExistente) {
     // Importar XML num pedido ja existente: atualiza o mesmo registro em vez de criar outro.
