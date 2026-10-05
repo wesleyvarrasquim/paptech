@@ -1436,6 +1436,8 @@ const CAMPOS_PRODUTO_IMPOSTOS = [
   ['aliquota_ipi', 'Alíquota IPI (%)'],
   ['aliquota_pis', 'Alíquota PIS (%)'],
   ['aliquota_cofins', 'Alíquota COFINS (%)'],
+  ['ibs_cbs_cst', 'CST IBS/CBS (3 dígitos; vazio = padrão das Configurações)'],
+  ['ibs_cbs_classificacao', 'Classificação tributária IBS/CBS (cClassTrib, 6 dígitos; vazio = padrão)'],
 ];
 
 const CAMPOS_PRODUTO_ADICIONAIS = [
@@ -3519,6 +3521,13 @@ const NFE_CONFIG_PADRAO = {
   forma_pagamento_vista: '01',
   forma_pagamento_prazo: '15',
   informacoes_complementares: '',
+  // Reforma Tributária (IBS/CBS): 'auto' = envia só no Regime Normal; 'sempre' = envia também no Simples (facultativo até 2026); 'nunca' = não envia.
+  ibs_cbs_modo: 'auto',
+  ibs_cbs_cst_padrao: '000',
+  ibs_cbs_classif_padrao: '000001',
+  cbs_aliquota: '0.9',
+  ibs_uf_aliquota: '0.1',
+  ibs_mun_aliquota: '0',
 };
 
 const NFE_OPCOES_ORIGEM = [
@@ -3671,6 +3680,49 @@ function ajustarCfopDestino(cfop, interestadual) {
   return c;
 }
 
+/* ---------- Reforma Tributária: IBS / CBS ---------- */
+
+function ibsCbsAtivo(cfg) {
+  if (cfg.ibs_cbs_modo === 'sempre') return true;
+  if (cfg.ibs_cbs_modo === 'nunca') return false;
+  return cfg.regime_tributario === '3';
+}
+
+/* Preenche os campos de IBS/CBS de um item (modelo Focus NFe, NT 2025.002). A alíquota vem das
+   Configurações (em 2026: CBS 0,9% e IBS 0,1%, apenas destaque — sem recolhimento). */
+function aplicarIbsCbsItem(item, produto, cfg, base, avisos, rotulo) {
+  if (!ibsCbsAtivo(cfg)) return;
+  const cst = somenteDigitos(produto.ibs_cbs_cst || cfg.ibs_cbs_cst_padrao).padStart(3, '0');
+  const classif = somenteDigitos(produto.ibs_cbs_classificacao || cfg.ibs_cbs_classif_padrao).padStart(6, '0');
+  item.ibs_cbs_situacao_tributaria = cst;
+  item.ibs_cbs_classificacao_tributaria = classif;
+  if (cst !== '000') {
+    avisos.push(`${rotulo}: CST IBS/CBS ${cst} — o PAPTECH só calcula valores para a tributação normal (000); confira o item com seu contador.`);
+    return;
+  }
+  const num = v => Number(String(v == null ? '' : v).replace(',', '.')) || 0;
+  const aCbs = num(cfg.cbs_aliquota), aUf = num(cfg.ibs_uf_aliquota), aMun = num(cfg.ibs_mun_aliquota);
+  item.ibs_cbs_base_calculo = arred2(base);
+  item.cbs_aliquota = aCbs;
+  item.cbs_valor = arred2(base * aCbs / 100);
+  item.ibs_uf_aliquota = aUf;
+  item.ibs_uf_valor = arred2(base * aUf / 100);
+  item.ibs_mun_aliquota = aMun;
+  item.ibs_mun_valor = arred2(base * aMun / 100);
+}
+
+function aplicarIbsCbsTotais(payload, items) {
+  const com = items.filter(i => i.ibs_cbs_base_calculo !== undefined);
+  if (!com.length) return;
+  const soma = campo => arred2(com.reduce((t, i) => t + (Number(i[campo]) || 0), 0));
+  payload.ibs_cbs_base_calculo = soma('ibs_cbs_base_calculo');
+  payload.cbs_valor_total = soma('cbs_valor');
+  payload.ibs_uf_valor_total = soma('ibs_uf_valor');
+  payload.ibs_mun_valor_total = soma('ibs_mun_valor');
+  payload.ibs_valor_total = arred2(payload.ibs_uf_valor_total + payload.ibs_mun_valor_total);
+  payload.ibs_cbs_is_valor_total = arred2(payload.cbs_valor_total + payload.ibs_valor_total);
+}
+
 /* opcoes: { natureza, consumidor_final (bool|null), prazos (array dias), incluir_frete (bool),
              volumes (número), informacoes (texto) }
    Retorna { payload, erros[], avisos[], resumo } */
@@ -3801,6 +3853,7 @@ function montarNfeVenda(venda, opcoes) {
         item[`${tributo}_valor`] = arred2(base * aliq / 100);
       }
     });
+    aplicarIbsCbsItem(item, produto, cfg, arred2(valorBruto + freteItem), avisos, rotulo);
     return item;
   });
 
@@ -3880,6 +3933,8 @@ function montarNfeVenda(venda, opcoes) {
   if (somenteDigitos(c.telefone)) payload.telefone_destinatario = somenteDigitos(c.telefone);
   const emailNfeCliente = String(c.email_xml_nfe || c.email || '').trim();
   if (emailNfeCliente.includes('@')) payload.email_destinatario = emailNfeCliente;
+
+  aplicarIbsCbsTotais(payload, items);
 
   if (duplicatas) {
     payload.numero_fatura = String(venda.numero || venda.id);
@@ -4438,6 +4493,19 @@ function blocoConfiguracaoNfeHtml() {
         <input type="text" id="nfe-cfg-cofins" value="${escapeHtml(cfg.cofins_cst_padrao)}" placeholder="Simples: 49 ou 99 · Normal: 01">
       </div>
       <div class="campo">
+        <label>IBS/CBS (Reforma Tributária)</label>
+        <select id="nfe-cfg-ibs-modo">
+          <option value="auto" ${cfg.ibs_cbs_modo === 'auto' ? 'selected' : ''}>Automático (envia no Regime Normal)</option>
+          <option value="sempre" ${cfg.ibs_cbs_modo === 'sempre' ? 'selected' : ''}>Sempre enviar (inclusive Simples)</option>
+          <option value="nunca" ${cfg.ibs_cbs_modo === 'nunca' ? 'selected' : ''}>Nunca enviar</option>
+        </select>
+      </div>
+      <div class="campo"><label>CST IBS/CBS padrão</label><input type="text" id="nfe-cfg-ibs-cst" value="${escapeHtml(cfg.ibs_cbs_cst_padrao)}" placeholder="000"></div>
+      <div class="campo"><label>Classificação tributária padrão (cClassTrib)</label><input type="text" id="nfe-cfg-ibs-classif" value="${escapeHtml(cfg.ibs_cbs_classif_padrao)}" placeholder="000001"></div>
+      <div class="campo"><label>Alíquota CBS (%)</label><input type="text" id="nfe-cfg-cbs" value="${escapeHtml(cfg.cbs_aliquota)}" placeholder="0.9"></div>
+      <div class="campo"><label>Alíquota IBS estadual (%)</label><input type="text" id="nfe-cfg-ibs-uf" value="${escapeHtml(cfg.ibs_uf_aliquota)}" placeholder="0.1"></div>
+      <div class="campo"><label>Alíquota IBS municipal (%)</label><input type="text" id="nfe-cfg-ibs-mun" value="${escapeHtml(cfg.ibs_mun_aliquota)}" placeholder="0"></div>
+      <div class="campo">
         <label>Forma de pagamento à vista</label>
         <select id="nfe-cfg-pag-vista">${opcoesSelectHtml(NFE_FORMAS_PAGAMENTO, cfg.forma_pagamento_vista)}</select>
       </div>
@@ -4473,6 +4541,12 @@ function lerConfiguracaoNfeDaTela() {
     presenca_comprador: v('nfe-cfg-presenca') || '1',
     pis_cst_padrao: somenteDigitos(v('nfe-cfg-pis')),
     cofins_cst_padrao: somenteDigitos(v('nfe-cfg-cofins')),
+    ibs_cbs_modo: ['auto', 'sempre', 'nunca'].includes(v('nfe-cfg-ibs-modo')) ? v('nfe-cfg-ibs-modo') : 'auto',
+    ibs_cbs_cst_padrao: somenteDigitos(v('nfe-cfg-ibs-cst')) || '000',
+    ibs_cbs_classif_padrao: somenteDigitos(v('nfe-cfg-ibs-classif')) || '000001',
+    cbs_aliquota: (v('nfe-cfg-cbs') || '0.9').replace(',', '.'),
+    ibs_uf_aliquota: (v('nfe-cfg-ibs-uf') || '0.1').replace(',', '.'),
+    ibs_mun_aliquota: (v('nfe-cfg-ibs-mun') || '0').replace(',', '.'),
     forma_pagamento_vista: v('nfe-cfg-pag-vista') || '01',
     forma_pagamento_prazo: v('nfe-cfg-pag-prazo') || '15',
     informacoes_complementares: document.getElementById('nfe-cfg-informacoes') ? document.getElementById('nfe-cfg-informacoes').value.trim() : '',
@@ -5612,6 +5686,7 @@ function montarNfceVenda(venda) {
         item[`${tributo}_valor`] = arred2(base * aliq / 100);
       }
     });
+    aplicarIbsCbsItem(item, produto, cfg, bruto, [], rotulo);
     return item;
   });
   if (!items.length) erros.push('A venda não tem itens.');
@@ -5636,6 +5711,7 @@ function montarNfceVenda(venda) {
     formas_pagamento: (venda.pagamentos || []).map(p => ({ forma_pagamento: p.codigo, valor_pagamento: arred2(p.valor) })),
     items,
   };
+  aplicarIbsCbsTotais(payload, items);
   if (arred2(valorProdutos) !== arred2(venda.valor_total)) erros.push('Total dos itens difere do total da venda.');
   if (somenteDigitos(venda.cpf_consumidor).length === 11) payload.cpf_destinatario = somenteDigitos(venda.cpf_consumidor);
   return { payload, erros };
