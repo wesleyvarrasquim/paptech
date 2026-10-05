@@ -37,9 +37,11 @@ const BASES = {
 };
 
 const ROTA_PERMITIDA = /^\/v2\/nfce?(\/[A-Za-z0-9_.-]+(\/carta_correcao)?)?$/;
+// Cadastro de empresa na Focus (só para enviar o certificado digital; nada fica guardado no PAPTECH).
+const ROTA_EMPRESAS = /^\/v2\/empresas(\/[A-Za-z0-9_.-]+)?$/;
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-client-info, x-ambiente, x-paptech-chave',
 };
 
@@ -68,14 +70,17 @@ http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   const inicio = url.pathname.indexOf('/v2/');
   const caminho = inicio >= 0 ? url.pathname.slice(inicio) : '';
-  if (!ROTA_PERMITIDA.test(caminho)) return responderJson(res, 400, { erro: 'rota_invalida', mensagem: 'Rota não permitida pelo intermediário.' });
-  if (!['GET', 'POST', 'DELETE'].includes(req.method)) return responderJson(res, 405, { erro: 'metodo_invalido', mensagem: 'Método não permitido.' });
+  const ehEmpresas = ROTA_EMPRESAS.test(caminho);
+  if (!ROTA_PERMITIDA.test(caminho) && !(ehEmpresas && ['GET', 'PUT'].includes(req.method))) return responderJson(res, 400, { erro: 'rota_invalida', mensagem: 'Rota não permitida pelo intermediário.' });
+  if (!['GET', 'POST', 'PUT', 'DELETE'].includes(req.method)) return responderJson(res, 405, { erro: 'metodo_invalido', mensagem: 'Método não permitido.' });
   if (req.headers['x-paptech-chave'] !== CHAVE) {
     return responderJson(res, 401, { erro: 'chave_intermediario_invalida', mensagem: 'Chave do intermediário inválida.' });
   }
 
   const ambiente = req.headers['x-ambiente'] === 'producao' ? 'producao' : 'homologacao';
-  const token = TOKENS[ambiente];
+  // O cadastro de empresas costuma exigir o "token principal" da conta (opcional: FOCUS_TOKEN_PRINCIPAL_*).
+  const tokenPrincipal = opcao(ambiente === 'producao' ? 'FOCUS_TOKEN_PRINCIPAL_PRODUCAO' : 'FOCUS_TOKEN_PRINCIPAL_HOMOLOGACAO');
+  const token = ehEmpresas && tokenPrincipal ? tokenPrincipal : TOKENS[ambiente];
   if (!token) return responderJson(res, 500, { erro: 'token_ausente', mensagem: `Token da Focus NFe de ${ambiente} não configurado no intermediário.` });
 
   try {

@@ -18,13 +18,15 @@ const BASES: Record<string, string> = {
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers":
     "authorization, apikey, content-type, x-client-info, x-ambiente, x-paptech-chave",
 };
 
 // Só libera as rotas de NF-e e NFC-e (emitir, consultar, cancelar, carta de correção).
 const ROTA_PERMITIDA = /^\/v2\/nfce?(\/[A-Za-z0-9_.-]+(\/carta_correcao)?)?$/;
+// Cadastro de empresa na Focus (usado só para enviar o certificado digital; nada fica guardado no PAPTECH).
+const ROTA_EMPRESAS = /^\/v2\/empresas(\/[A-Za-z0-9_.-]+)?$/;
 
 function json(status: number, dados: unknown) {
   return new Response(JSON.stringify(dados), {
@@ -46,10 +48,11 @@ Deno.serve(async (req) => {
   const url = new URL(req.url);
   const inicio = url.pathname.indexOf("/v2/");
   const caminho = inicio >= 0 ? url.pathname.slice(inicio) : "";
-  if (!ROTA_PERMITIDA.test(caminho)) {
+  const ehEmpresas = ROTA_EMPRESAS.test(caminho);
+  if (!ROTA_PERMITIDA.test(caminho) && !(ehEmpresas && ["GET", "PUT"].includes(req.method))) {
     return json(400, { erro: "rota_invalida", mensagem: "Rota não permitida pelo intermediário." });
   }
-  if (!["GET", "POST", "DELETE"].includes(req.method)) {
+  if (!["GET", "POST", "PUT", "DELETE"].includes(req.method)) {
     return json(405, { erro: "metodo_invalido", mensagem: "Método não permitido." });
   }
 
@@ -63,7 +66,11 @@ Deno.serve(async (req) => {
   }
 
   const ambiente = req.headers.get("x-ambiente") === "producao" ? "producao" : "homologacao";
-  const token = Deno.env.get(ambiente === "producao" ? "FOCUS_TOKEN_PRODUCAO" : "FOCUS_TOKEN_HOMOLOGACAO");
+  // O cadastro de empresas costuma exigir o "token principal" da conta (opcional: FOCUS_TOKEN_PRINCIPAL_*).
+  const nomeToken = ehEmpresas && Deno.env.get(ambiente === "producao" ? "FOCUS_TOKEN_PRINCIPAL_PRODUCAO" : "FOCUS_TOKEN_PRINCIPAL_HOMOLOGACAO")
+    ? (ambiente === "producao" ? "FOCUS_TOKEN_PRINCIPAL_PRODUCAO" : "FOCUS_TOKEN_PRINCIPAL_HOMOLOGACAO")
+    : (ambiente === "producao" ? "FOCUS_TOKEN_PRODUCAO" : "FOCUS_TOKEN_HOMOLOGACAO");
+  const token = Deno.env.get(nomeToken);
   if (!token) {
     return json(500, {
       erro: "token_ausente",

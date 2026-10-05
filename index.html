@@ -4460,6 +4460,13 @@ function blocoConfiguracaoNfeHtml() {
         <label>Chave do intermediário (a mesma de PAPTECH_CHAVE_NFE) — fica salva só neste computador</label>
         <input type="password" id="nfe-cfg-chave" value="${escapeHtml(chaveIntermediarioNfe())}" autocomplete="off">
       </div>
+      <div class="campo campo-span-2">
+        <label>Certificado digital A1 (.pfx / .p12) — é enviado direto para a Focus NFe e <strong>não fica guardado</strong> no PAPTECH</label>
+        <input type="file" id="nfe-cert-arquivo" accept=".pfx,.p12">
+        <input type="password" id="nfe-cert-senha" placeholder="Senha do certificado" autocomplete="off" style="margin-top:6px">
+        <button type="button" class="btn-secondary" id="nfe-cert-botao" style="margin-top:6px" onclick="enviarCertificadoFocus()">🔐 Enviar certificado à Focus NFe</button>
+        <div id="nfe-cert-status" style="margin-top:6px"></div>
+      </div>
       <div class="campo">
         <label>Regime tributário da empresa</label>
         <select id="nfe-cfg-regime">${opcoesSelectHtml(NFE_REGIMES, cfg.regime_tributario)}</select>
@@ -4551,6 +4558,56 @@ function lerConfiguracaoNfeDaTela() {
     forma_pagamento_prazo: v('nfe-cfg-pag-prazo') || '15',
     informacoes_complementares: document.getElementById('nfe-cfg-informacoes') ? document.getElementById('nfe-cfg-informacoes').value.trim() : '',
   };
+}
+
+/* Envia o certificado A1 direto para a Focus NFe (cadastro da empresa). O arquivo e a senha só
+   passam pela memória desta tela: nada é gravado no PAPTECH, no navegador nem na nuvem. */
+async function enviarCertificadoFocus() {
+  const status = document.getElementById('nfe-cert-status');
+  const botao = document.getElementById('nfe-cert-botao');
+  const mostrar = (texto, ok) => { if (status) status.innerHTML = `<span style="color:${ok ? '#2e7d32' : '#c62828'}">${escapeHtml(texto).replace(/\n/g, '<br>')}</span>`; };
+  const arquivo = document.getElementById('nfe-cert-arquivo').files[0];
+  const senha = document.getElementById('nfe-cert-senha').value;
+  const cnpj = somenteDigitos(dadosEmpresaAtuais().cnpj);
+  if (cnpj.length !== 14) { mostrar('Preencha o CNPJ em Configurações → Dados da Empresa antes de enviar o certificado.'); return; }
+  if (!arquivo) { mostrar('Escolha o arquivo do certificado (.pfx ou .p12).'); return; }
+  if (!senha) { mostrar('Informe a senha do certificado.'); return; }
+  salvarConfiguracaoNfe(true);
+  const cfg = configNfe();
+  if (cfg.ambiente === 'producao' && !confirm('Enviar o certificado para a Focus NFe em PRODUÇÃO?')) return;
+  botao.disabled = true;
+  mostrar('Enviando...', true);
+  try {
+    const base64 = await new Promise((resolve, reject) => {
+      const leitor = new FileReader();
+      leitor.onload = () => resolve(String(leitor.result).split(',')[1] || '');
+      leitor.onerror = () => reject(new Error('Não foi possível ler o arquivo.'));
+      leitor.readAsDataURL(arquivo);
+    });
+    // Descobre o identificador da empresa na Focus (por CNPJ); se não achar, tenta o próprio CNPJ.
+    let idEmpresa = cnpj;
+    try {
+      const lista = await chamarFocusNfe('GET', `/v2/empresas?cnpj=${cnpj}`);
+      const item = Array.isArray(lista.dados) ? lista.dados[0] : null;
+      if (item && item.id) idEmpresa = item.id;
+    } catch (e) { /* segue com o CNPJ */ }
+    const { status: http, dados } = await chamarFocusNfe('PUT', `/v2/empresas/${encodeURIComponent(idEmpresa)}`, {
+      arquivo_certificado_base64: base64,
+      senha_certificado: senha,
+    });
+    if (http >= 200 && http < 300) {
+      mostrar('Certificado enviado com sucesso para a Focus NFe (' + (cfg.ambiente === 'producao' ? 'produção' : 'homologação') + ').', true);
+    } else {
+      mostrar('A Focus não aceitou o certificado (HTTP ' + http + '):\n' + mensagemErroFocus(dados, http) +
+        (http === 401 || http === 403 ? '\n\nO cadastro de empresas costuma exigir o "token principal" da conta: configure FOCUS_TOKEN_PRINCIPAL_* no intermediário.' : ''), false);
+    }
+  } catch (erro) {
+    mostrar(erro.message, false);
+  } finally {
+    document.getElementById('nfe-cert-senha').value = '';
+    document.getElementById('nfe-cert-arquivo').value = '';
+    botao.disabled = false;
+  }
 }
 
 function salvarConfiguracaoNfe(silencioso) {
