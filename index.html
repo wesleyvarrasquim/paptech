@@ -5148,6 +5148,7 @@ let pdvDescontoTexto = '';
 let pdvCpf = '';
 let pdvEmitirNfce = true;
 let pdvResultados = [];
+let pdvPedidoOrigemId = null;
 
 function pdvCaixaAberto() {
   return loadList('caixas').find(c => c.status === 'aberto') || null;
@@ -5253,6 +5254,8 @@ function renderPdv() {
     </div>
     <div style="display:grid;grid-template-columns:minmax(260px,1fr) minmax(300px,1.3fr);gap:16px">
       <div class="card">
+        <label><strong>Carregar pedido de venda</strong> (nº)</label>
+        <div style="display:flex;gap:6px;margin-bottom:12px"><input type="text" id="pdv-pedido" placeholder="Número do pedido" onkeydown="if(event.key==='Enter'){event.preventDefault();pdvCarregarPedido()}" style="flex:1"><button class="btn-secondary" onclick="pdvCarregarPedido()">Carregar</button></div>
         <label><strong>Produto</strong> (código, código de barras ou nome — use <code>3*código</code> para quantidade)</label>
         <input type="text" id="pdv-busca" autocomplete="off" placeholder="Digite e tecle Enter" oninput="pdvBuscar()" onkeydown="pdvTeclaBusca(event)" style="font-size:18px">
         <div id="pdv-resultados" style="margin-top:8px"></div>
@@ -5341,6 +5344,36 @@ function pdvAdicionarProduto(produtoId, quantidade) {
   pdvRenderCarrinho();
 }
 
+/* Carrega no carrinho um pedido de venda ainda sem faturamento (sem NF-e, estoque ou recebimento).
+   Ao finalizar, o pedido é substituído pela venda do caixa. */
+function pdvCarregarPedido() {
+  const campo = document.getElementById('pdv-pedido');
+  const termo = campo ? campo.value.trim() : '';
+  if (!termo) return;
+  const norm = x => String(x == null ? '' : x).trim().toLowerCase();
+  const vendas = loadList('vendas').filter(v => v.origem !== 'pdv');
+  const venda = vendas.find(v => norm(v.numero) === norm(termo)) || vendas.find(v => String(v.id) === termo);
+  if (!venda) { alert('Pedido de venda não encontrado.'); return; }
+  if (venda.recebimento_gerado || venda.status_nf === 'Emitida' || venda.nfe_ref) {
+    alert('Este pedido já foi faturado (NF-e/recebimento gerado) e não pode ser carregado na Frente de Caixa.');
+    return;
+  }
+  if (!(venda.itens || []).length) { alert('O pedido não tem itens.'); return; }
+  if (pdvCarrinho.length && !confirm('Substituir o carrinho atual pelo pedido ' + (venda.numero || venda.id) + '?')) return;
+  pdvCarrinho = venda.itens.map(i => ({
+    produto_id: i.produto_id, descricao: i.descricao,
+    quantidade: Number(i.quantidade) || 0, valor_unitario: Number(i.valor_unitario) || 0,
+  }));
+  pdvDescontoTexto = '';
+  const cli = loadList('clientes').find(c => c.id === venda.cliente_id);
+  const doc = cli ? somenteDigitos(cli.cnpj_cpf || cli.cpf_cnpj || cli.cnpj || cli.cpf) : '';
+  pdvCpf = doc.length === 11 ? doc : '';
+  pdvPedidoOrigemId = venda.id;
+  renderPdv();
+  const aviso = document.getElementById('pdv-pedido');
+  if (aviso) aviso.placeholder = 'Pedido ' + (venda.numero || venda.id) + ' carregado';
+}
+
 function pdvRenderCarrinho() {
   const alvo = document.getElementById('pdv-carrinho');
   if (!alvo) return;
@@ -5380,7 +5413,7 @@ function pdvAlterarPreco(idx, texto) {
 function pdvRemoverItem(idx) { pdvCarrinho.splice(idx, 1); pdvRenderCarrinho(); }
 function pdvLimparCarrinho(confirmar) {
   if (confirmar && pdvCarrinho.length && !confirm('Limpar o carrinho?')) return;
-  pdvCarrinho = []; pdvDescontoTexto = ''; pdvCpf = '';
+  pdvCarrinho = []; pdvDescontoTexto = ''; pdvCpf = ''; pdvPedidoOrigemId = null;
   if (document.getElementById('sec-pdv') && document.getElementById('sec-pdv').style.display !== 'none') renderPdv();
 }
 
@@ -5476,11 +5509,18 @@ function pdvConfirmarVenda() {
     status_nf: 'Pendente', numero_nf: '', serie_nf: '', data_emissao_nf: '', chave_nfe: '',
     nfce: emitir, recebimento_gerado: true,
   };
+  if (pdvPedidoOrigemId) {
+    const idxPedido = vendas.findIndex(v => v.id === pdvPedidoOrigemId && v.origem !== 'pdv' && !v.recebimento_gerado);
+    if (idxPedido !== -1) {
+      venda.pedido_origem = vendas[idxPedido].numero || String(vendas[idxPedido].id);
+      vendas.splice(idxPedido, 1);
+    }
+  }
   vendas.push(venda);
   saveList('vendas', vendas);
   aplicarBaixaEstoqueVenda(itens);
 
-  pdvCarrinho = []; pdvDescontoTexto = ''; pdvCpf = '';
+  pdvCarrinho = []; pdvDescontoTexto = ''; pdvCpf = ''; pdvPedidoOrigemId = null;
   fecharModal();
   renderPdv();
   pdvMostrarConclusao(id, emitir);
@@ -5815,7 +5855,7 @@ function pdvConfirmarFechamento() {
   caixa.diferenca = arred2(contado - r.esperadoDinheiro);
   caixa.resumo = r;
   saveList('caixas', caixas);
-  pdvCarrinho = []; pdvDescontoTexto = ''; pdvCpf = '';
+  pdvCarrinho = []; pdvDescontoTexto = ''; pdvCpf = ''; pdvPedidoOrigemId = null;
   fecharModal();
   renderPdv();
   pdvImprimirRelatorioCaixa(caixa.id);
