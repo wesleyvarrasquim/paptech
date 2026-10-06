@@ -616,6 +616,7 @@ async function enviarParaNuvem(chave, lista) {
 }
 
 let itensCompraTemp = [];
+let itemCompraEditando = -1; // índice do item em edição na tabela de itens da compra
 let itensVendaTemp = [];
 let itemVendaEditando = -1; // índice do item em edição na tabela de itens da venda
 let pesoManualVenda = false; // true quando o usuário digitou o peso (não recalcula pelos itens)
@@ -3072,6 +3073,7 @@ function removerDevolucaoCompra(id) {
 function abrirFormCompraManual(id) {
   const registro = id ? loadList('compras').find(c => c.id === id) : null;
   itensCompraTemp = registro ? JSON.parse(JSON.stringify(registro.itens || [])) : [];
+  itemCompraEditando = -1;
   produtoSelecionadoCompra = null;
   const fornecedores = loadList('fornecedores');
   const transportadoras = loadList('transportadoras');
@@ -3317,14 +3319,57 @@ function adicionarItemCompra() {
 }
 
 function removerItemCompra(indice) {
+  const it = itensCompraTemp[indice];
+  if (it && !confirm(`Excluir o item "${it.descricao}" do pedido?`)) return;
   itensCompraTemp.splice(indice, 1);
+  itemCompraEditando = -1;
+  atualizarTabelaItensTemp();
+}
+
+function editarItemCompra(indice) {
+  itemCompraEditando = indice;
+  atualizarTabelaItensTemp();
+}
+
+function cancelarEdicaoItemCompra() {
+  itemCompraEditando = -1;
+  atualizarTabelaItensTemp();
+}
+
+function salvarEdicaoItemCompra(indice) {
+  const it = itensCompraTemp[indice];
+  if (!it) return;
+  const quantidade = numeroBr(document.getElementById('compra-edit-qtd').value);
+  const valorUnit = numeroBr(document.getElementById('compra-edit-valor').value);
+  const icms = numeroBr(document.getElementById('compra-edit-icms').value);
+  const ipi = numeroBr(document.getElementById('compra-edit-ipi').value);
+  if (!quantidade || quantidade <= 0) { alert('Informe uma quantidade válida.'); return; }
+  if (isNaN(valorUnit) || valorUnit < 0) { alert('Informe um valor unitário válido.'); return; }
+  it.quantidade = quantidade;
+  it.valor_unitario = valorUnit;
+  it.icms_percentual = icms || 0;
+  it.ipi_percentual = ipi || 0;
+  it.valor_total = quantidade * valorUnit;
+  itemCompraEditando = -1;
   atualizarTabelaItensTemp();
 }
 
 function atualizarTabelaItensTemp() {
   const tbody = document.getElementById('itens-compra-tbody');
   if (!tbody) return;
-  tbody.innerHTML = itensCompraTemp.map((it, idx) => `
+  tbody.innerHTML = itensCompraTemp.map((it, idx) => idx === itemCompraEditando ? `
+    <tr class="item-em-edicao">
+      <td>${escapeHtml(it.descricao)}</td>
+      <td><input type="text" id="compra-edit-qtd" value="${String(it.quantidade).replace('.', ',')}" style="width:58px" inputmode="decimal"></td>
+      <td><input type="text" id="compra-edit-icms" value="${(Number(it.icms_percentual) || 0).toFixed(2).replace('.', ',')}" style="width:58px" inputmode="decimal"></td>
+      <td><input type="text" id="compra-edit-ipi" value="${(Number(it.ipi_percentual) || 0).toFixed(2).replace('.', ',')}" style="width:58px" inputmode="decimal"></td>
+      <td><input type="text" id="compra-edit-valor" value="${(Number(it.valor_unitario) || 0).toFixed(2).replace('.', ',')}" style="width:74px" inputmode="decimal"></td>
+      <td>—</td>
+      <td class="acoes">
+        <button type="button" onclick="salvarEdicaoItemCompra(${idx})" title="Salvar alteração do item">&#10003;</button>
+        <button type="button" onclick="cancelarEdicaoItemCompra()" title="Cancelar">&#10005;</button>
+      </td>
+    </tr>` : `
     <tr>
       <td>${escapeHtml(it.descricao)}</td>
       <td>${it.quantidade}</td>
@@ -3332,7 +3377,10 @@ function atualizarTabelaItensTemp() {
       <td>${(Number(it.ipi_percentual) || 0).toFixed(2)}%</td>
       <td>${formatarMoeda(it.valor_unitario)}</td>
       <td>${formatarMoeda(it.valor_total)}</td>
-      <td class="acoes"><button type="button" onclick="removerItemCompra(${idx})" title="Remover">&#128465;</button></td>
+      <td class="acoes">
+        <button type="button" onclick="editarItemCompra(${idx})" title="Editar valor e quantidade do item">&#9998;</button>
+        <button type="button" onclick="removerItemCompra(${idx})" title="Excluir item do pedido">&#128465;</button>
+      </td>
     </tr>
   `).join('') || '<tr><td colspan="7" class="vazio">Nenhum item adicionado.</td></tr>';
 }
