@@ -4105,8 +4105,59 @@ function abrirEmitirNfeVenda(vendaId) {
 
     <div class="modal-botoes">
       ${configurada ? `<button type="button" class="btn-primary" id="nfe-emitir-botao" onclick="transmitirNfeVenda(${venda.id})" ${erros.length ? 'disabled title="Corrija os erros acima"' : ''}>📤 Transmitir para a SEFAZ</button>` : ''}
+      <button type="button" class="btn-secondary" onclick="abrirPreviaNfeVenda(${venda.id})" title="Mostra como a nota será montada, sem enviar nada à SEFAZ">👁️ Ver montagem da NF-e (sem transmitir)</button>
       <button type="button" class="btn-secondary" onclick="abrirRegistroManualNfeVenda(${venda.id})">Registrar nota emitida em outro sistema</button>
       <button type="button" class="btn-secondary" onclick="fecharModal()">Fechar</button>
+    </div>
+  `);
+}
+
+/* Mostra como a NF-e fica montada (espelho + JSON), sem transmitir nada — não precisa de certificado. */
+function abrirPreviaNfeVenda(vendaId) {
+  const venda = loadList('vendas').find(v => v.id === vendaId);
+  if (!venda) return;
+  const { payload, erros, avisos, resumo } = montarNfeVenda(venda, opcoesNfeDoFormulario(venda));
+  const v = x => escapeHtml(x == null || x === '' ? '—' : x);
+  const itens = payload.items.map(it => `
+    <tr>
+      <td>${it.numero_item}</td>
+      <td>${v(it.codigo_produto)}</td>
+      <td>${v(it.descricao)}</td>
+      <td>${v(it.codigo_ncm)}</td>
+      <td>${v(it.cfop)}</td>
+      <td>${v(it.icms_origem)}/${v(it.icms_situacao_tributaria)}</td>
+      <td style="text-align:right">${String(it.quantidade_comercial).replace('.', ',')} ${v(it.unidade_comercial)}</td>
+      <td style="text-align:right">${formatarMoeda(it.valor_unitario_comercial)}</td>
+      <td style="text-align:right">${formatarMoeda(it.valor_bruto)}</td>
+      <td>${it.ibs_cbs_situacao_tributaria ? `${v(it.ibs_cbs_situacao_tributaria)} / ${v(it.ibs_cbs_classificacao_tributaria)}<br><small>CBS ${formatarMoeda(it.cbs_valor)} · IBS ${formatarMoeda((it.ibs_uf_valor || 0) + (it.ibs_mun_valor || 0))}</small>` : '—'}</td>
+    </tr>`).join('');
+  const pagamentos = (payload.formas_pagamento || []).map(f => `${v(f.forma_pagamento)} — ${formatarMoeda(f.valor_pagamento)}`).join('<br>');
+  abrirModal(`
+    <h2>Montagem da NF-e — Venda #${venda.id}</h2>
+    <div class="aviso">Pré-visualização apenas: nada foi enviado à SEFAZ nem à Focus NFe, e não usa certificado digital.</div>
+    ${erros.length ? `<div class="nfe-erros"><strong>Pendências para transmitir:</strong><ul>${erros.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul></div>` : '<div class="info-cliente-caixa">Nenhuma pendência: a nota está pronta para transmitir.</div>'}
+    ${avisos.length ? `<div class="aviso"><ul style="margin:0;padding-left:18px">${avisos.map(a => `<li>${escapeHtml(a)}</li>`).join('')}</ul></div>` : ''}
+    <div class="campos-empresa-grid">
+      <div class="campo campo-span-2"><label>Natureza / tipo</label><div>${v(payload.natureza_operacao)} · ${resumo.interestadual ? 'interestadual' : 'dentro do estado'} · consumidor final: ${payload.consumidor_final ? 'sim' : 'não'}</div></div>
+      <div class="campo"><label>Emitente</label><div>${v(payload.nome_emitente)}<br>CNPJ ${v(payload.cnpj_emitente)} · IE ${v(payload.inscricao_estadual_emitente)}<br>${v(payload.logradouro_emitente)}, ${v(payload.numero_emitente)} — ${v(payload.municipio_emitente)}/${v(payload.uf_emitente)}</div></div>
+      <div class="campo"><label>Destinatário</label><div>${v(payload.nome_destinatario)}<br>${v(payload.cnpj_destinatario || payload.cpf_destinatario)} · IE ${v(payload.inscricao_estadual_destinatario)}<br>${v(payload.logradouro_destinatario)}, ${v(payload.numero_destinatario)} — ${v(payload.municipio_destinatario)}/${v(payload.uf_destinatario)}</div></div>
+    </div>
+    <div style="overflow:auto">
+    <table class="data-table">
+      <thead><tr><th>#</th><th>Cód.</th><th>Descrição</th><th>NCM</th><th>CFOP</th><th>Orig/CST</th><th>Qtd.</th><th>Unit.</th><th>Valor</th><th>IBS/CBS</th></tr></thead>
+      <tbody>${itens || '<tr><td colspan="10" class="vazio">Sem itens.</td></tr>'}</tbody>
+    </table>
+    </div>
+    <div class="nfe-totais">
+      Produtos: <strong>${formatarMoeda(payload.valor_produtos)}</strong> · Frete: ${formatarMoeda(payload.valor_frete)} · <strong>Total: ${formatarMoeda(payload.valor_total)}</strong>
+      ${payload.ibs_cbs_is_valor_total !== undefined ? `<br>IBS/CBS (destaque): CBS ${formatarMoeda(payload.cbs_valor_total)} · IBS ${formatarMoeda(payload.ibs_valor_total)}` : ''}
+    </div>
+    <div style="margin-top:8px"><strong>Pagamento:</strong><br>${pagamentos || '—'}${payload.duplicatas ? '<br>' + payload.duplicatas.map(d => `Parcela ${v(d.numero)}: ${formatarDataBr(d.data_vencimento)} — ${formatarMoeda(d.valor)}`).join('<br>') : ''}</div>
+    <details style="margin-top:12px"><summary>Ver o JSON completo que seria enviado</summary>
+      <pre style="max-height:300px;overflow:auto;font-size:11px;background:#f5f5f5;padding:8px">${escapeHtml(JSON.stringify(payload, null, 2))}</pre>
+    </details>
+    <div class="modal-botoes">
+      <button type="button" class="btn-secondary" onclick="abrirEmitirNfeVenda(${venda.id})">Voltar</button>
     </div>
   `);
 }
