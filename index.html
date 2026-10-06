@@ -617,6 +617,7 @@ async function enviarParaNuvem(chave, lista) {
 
 let itensCompraTemp = [];
 let itensVendaTemp = [];
+let pesoManualVenda = false; // true quando o usuário digitou o peso (não recalcula pelos itens)
 let produtoSelecionadoVenda = null;
 let produtoSelecionadoCompra = null;
 let produtoSelecionadoMovimento = null;
@@ -5551,6 +5552,7 @@ function abrirFormVendaManual(id) {
   }
   const registro = id ? loadList('vendas').find(v => v.id === id) : null;
   itensVendaTemp = registro ? JSON.parse(JSON.stringify(registro.itens || [])) : [];
+  pesoManualVenda = !!(registro && registro.peso_manual);
   produtoSelecionadoVenda = null;
   const clientes = loadList('clientes');
   const transportadoras = loadList('transportadoras');
@@ -5615,8 +5617,11 @@ function abrirFormVendaManual(id) {
         <input type="text" id="venda-especie" value="${escapeHtml(registro ? (registro.especie || 'Volumes') : 'Volumes')}">
       </div>
       <div class="campo">
-        <label>Peso Total (calculado a partir dos itens)</label>
-        <div id="venda-peso-total" class="valor-calculado">0,000 kg</div>
+        <label>Peso Total (kg) — calculado pelos itens; pode editar</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="text" id="venda-peso-total" inputmode="decimal" value="${registro ? (Number(registro.peso_total) || 0).toFixed(3).replace('.', ',') : '0,000'}" oninput="pesoManualVenda = true">
+          <button type="button" class="btn-secondary" onclick="pesoManualVenda = false; atualizarPesoTotalVenda()" title="Voltar a calcular pelo peso dos produtos">Recalcular</button>
+        </div>
       </div>
       <div class="campo">
         <label>Condição de Pagamento — prazos em dias, separados por / (ex: 30/45/60, máximo 10x)</label>
@@ -5812,14 +5817,14 @@ function atualizarTabelaItensVendaTemp() {
 
 function atualizarPesoTotalVenda() {
   const pesoEl = document.getElementById('venda-peso-total');
-  if (!pesoEl) return;
+  if (!pesoEl || pesoManualVenda) return;
   const produtos = loadList('produtos');
   const pesoTotal = itensVendaTemp.reduce((soma, item) => {
     const produto = produtos.find(p => p.id === item.produto_id);
     const pesoUnitario = produto ? (Number(produto.peso) || 0) : 0;
     return soma + pesoUnitario * (Number(item.quantidade) || 0);
   }, 0);
-  pesoEl.textContent = `${pesoTotal.toFixed(3)} kg`;
+  pesoEl.value = pesoTotal.toFixed(3).replace('.', ',');
 }
 
 function adicionarDias(dataIso, dias) {
@@ -5922,10 +5927,12 @@ function salvarVendaManual(id) {
 
   const valorTotal = itensVendaTemp.reduce((soma, it) => soma + it.valor_total, 0);
   const produtos = loadList('produtos');
-  const pesoTotal = itensVendaTemp.reduce((soma, item) => {
+  const pesoCalculado = itensVendaTemp.reduce((soma, item) => {
     const produto = produtos.find(p => p.id === item.produto_id);
     return soma + ((produto ? Number(produto.peso) || 0 : 0) * (Number(item.quantidade) || 0));
   }, 0);
+  const pesoDigitado = Math.max(0, numeroBr(document.getElementById('venda-peso-total').value) || 0);
+  const pesoTotal = pesoManualVenda ? Math.round(pesoDigitado * 1000) / 1000 : pesoCalculado;
 
   const vendas = loadList('vendas');
   const vendaAntiga = id ? vendas.find(v => v.id === id) : null;
@@ -5956,6 +5963,7 @@ function salvarVendaManual(id) {
     valor_frete: valorFrete,
     especie: especie,
     peso_total: pesoTotal,
+    peso_manual: pesoManualVenda,
     prazos_pagamento: prazosPagamento,
     status_nf: vendaAntiga ? (vendaAntiga.status_nf || 'Pendente') : 'Pendente',
     numero_nf: vendaAntiga ? (vendaAntiga.numero_nf || '') : '',
