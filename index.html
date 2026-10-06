@@ -617,6 +617,7 @@ async function enviarParaNuvem(chave, lista) {
 
 let itensCompraTemp = [];
 let itensVendaTemp = [];
+let itemVendaEditando = -1; // índice do item em edição na tabela de itens da venda
 let pesoManualVenda = false; // true quando o usuário digitou o peso (não recalcula pelos itens)
 let produtoSelecionadoVenda = null;
 let produtoSelecionadoCompra = null;
@@ -5553,6 +5554,7 @@ function abrirFormVendaManual(id) {
   const registro = id ? loadList('vendas').find(v => v.id === id) : null;
   itensVendaTemp = registro ? JSON.parse(JSON.stringify(registro.itens || [])) : [];
   pesoManualVenda = !!(registro && registro.peso_manual);
+  itemVendaEditando = -1;
   produtoSelecionadoVenda = null;
   const clientes = loadList('clientes');
   const transportadoras = loadList('transportadoras');
@@ -5796,20 +5798,61 @@ function adicionarItemVenda() {
 }
 
 function removerItemVenda(indice) {
+  const it = itensVendaTemp[indice];
+  if (it && !confirm(`Excluir o item "${it.descricao}" do pedido?`)) return;
   itensVendaTemp.splice(indice, 1);
+  itemVendaEditando = -1;
+  atualizarTabelaItensVendaTemp();
+}
+
+function editarItemVenda(indice) {
+  itemVendaEditando = indice;
+  atualizarTabelaItensVendaTemp();
+}
+
+function cancelarEdicaoItemVenda() {
+  itemVendaEditando = -1;
+  atualizarTabelaItensVendaTemp();
+}
+
+function salvarEdicaoItemVenda(indice) {
+  const it = itensVendaTemp[indice];
+  if (!it) return;
+  const quantidade = numeroBr(document.getElementById('venda-edit-qtd').value);
+  const valorUnit = numeroBr(document.getElementById('venda-edit-valor').value);
+  if (!quantidade || quantidade <= 0) { alert('Informe uma quantidade válida.'); return; }
+  if (valorUnit < 0 || isNaN(valorUnit)) { alert('Informe um valor unitário válido.'); return; }
+  it.quantidade = quantidade;
+  it.valor_unitario = valorUnit;
+  it.valor_total = Math.round(quantidade * valorUnit * 100) / 100;
+  itemVendaEditando = -1;
   atualizarTabelaItensVendaTemp();
 }
 
 function atualizarTabelaItensVendaTemp() {
   const tbody = document.getElementById('itens-venda-tbody');
-  tbody.innerHTML = itensVendaTemp.map((it, idx) => `
+  tbody.innerHTML = itensVendaTemp.map((it, idx) => idx === itemVendaEditando ? `
+    <tr class="item-em-edicao">
+      <td>${escapeHtml(it.descricao)}</td>
+      <td>${it.numero_pedido ? escapeHtml(it.numero_pedido) + (it.item_pedido ? ' / ' + escapeHtml(it.item_pedido) : '') : '-'}</td>
+      <td><input type="text" id="venda-edit-qtd" value="${String(it.quantidade).replace('.', ',')}" style="width:58px" inputmode="decimal"></td>
+      <td><input type="text" id="venda-edit-valor" value="${(Number(it.valor_unitario) || 0).toFixed(2).replace('.', ',')}" style="width:74px" inputmode="decimal"></td>
+      <td>—</td>
+      <td class="acoes">
+        <button type="button" onclick="salvarEdicaoItemVenda(${idx})" title="Salvar alteração do item">&#10003;</button>
+        <button type="button" onclick="cancelarEdicaoItemVenda()" title="Cancelar">&#10005;</button>
+      </td>
+    </tr>` : `
     <tr>
       <td>${escapeHtml(it.descricao)}</td>
       <td>${it.numero_pedido ? escapeHtml(it.numero_pedido) + (it.item_pedido ? ' / ' + escapeHtml(it.item_pedido) : '') : '-'}</td>
       <td>${it.quantidade}</td>
       <td>${formatarMoeda(it.valor_unitario)}</td>
       <td>${formatarMoeda(it.valor_total)}</td>
-      <td class="acoes"><button type="button" onclick="removerItemVenda(${idx})" title="Remover">&#128465;</button></td>
+      <td class="acoes">
+        <button type="button" onclick="editarItemVenda(${idx})" title="Editar valor e quantidade do item">&#9998;</button>
+        <button type="button" onclick="removerItemVenda(${idx})" title="Excluir item do pedido">&#128465;</button>
+      </td>
     </tr>
   `).join('') || '<tr><td colspan="6" class="vazio">Nenhum item adicionado.</td></tr>';
   atualizarPesoTotalVenda();
