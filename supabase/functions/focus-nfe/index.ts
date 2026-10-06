@@ -26,6 +26,8 @@ const CORS = {
 // Só libera as rotas de NF-e e NFC-e (emitir, consultar, cancelar, carta de correção).
 const ROTA_PERMITIDA = /^\/v2\/nfce?(\/[A-Za-z0-9_.-]+(\/carta_correcao)?)?$/;
 // Cadastro de empresa na Focus (usado só para enviar o certificado digital; nada fica guardado no PAPTECH).
+// Download de XML/PDF já emitidos (somente leitura), para exportar as notas à contabilidade.
+const ROTA_ARQUIVOS = /^\/arquivos\/(?!.*\.\.)[A-Za-z0-9_.\/-]+\.(xml|pdf)$/;
 const ROTA_EMPRESAS = /^\/v2\/empresas(\/[A-Za-z0-9_.-]+)?$/;
 
 function json(status: number, dados: unknown) {
@@ -47,9 +49,11 @@ Deno.serve(async (req) => {
 
   const url = new URL(req.url);
   const inicio = url.pathname.indexOf("/v2/");
-  const caminho = inicio >= 0 ? url.pathname.slice(inicio) : "";
+  const inicioArq = url.pathname.indexOf("/arquivos/");
+  const caminho = inicio >= 0 ? url.pathname.slice(inicio) : (inicioArq >= 0 ? url.pathname.slice(inicioArq) : "");
+  const ehArquivo = ROTA_ARQUIVOS.test(caminho);
   const ehEmpresas = ROTA_EMPRESAS.test(caminho);
-  if (!ROTA_PERMITIDA.test(caminho) && !(ehEmpresas && ["GET", "PUT"].includes(req.method))) {
+  if (!ROTA_PERMITIDA.test(caminho) && !(ehEmpresas && ["GET", "PUT"].includes(req.method)) && !(ehArquivo && req.method === "GET")) {
     return json(400, { erro: "rota_invalida", mensagem: "Rota não permitida pelo intermediário." });
   }
   if (!["GET", "POST", "PUT", "DELETE"].includes(req.method)) {

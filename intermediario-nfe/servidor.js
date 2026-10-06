@@ -38,6 +38,8 @@ const BASES = {
 
 const ROTA_PERMITIDA = /^\/v2\/nfce?(\/[A-Za-z0-9_.-]+(\/carta_correcao)?)?$/;
 // Cadastro de empresa na Focus (só para enviar o certificado digital; nada fica guardado no PAPTECH).
+// Download de XML/PDF já emitidos (somente leitura), para exportar as notas à contabilidade.
+const ROTA_ARQUIVOS = /^\/arquivos\/(?!.*\.\.)[A-Za-z0-9_.\/-]+\.(xml|pdf)$/;
 const ROTA_EMPRESAS = /^\/v2\/empresas(\/[A-Za-z0-9_.-]+)?$/;
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -69,9 +71,11 @@ http.createServer(async (req, res) => {
 
   const url = new URL(req.url, 'http://localhost');
   const inicio = url.pathname.indexOf('/v2/');
-  const caminho = inicio >= 0 ? url.pathname.slice(inicio) : '';
+  const inicioArq = url.pathname.indexOf('/arquivos/');
+  const caminho = inicio >= 0 ? url.pathname.slice(inicio) : (inicioArq >= 0 ? url.pathname.slice(inicioArq) : '');
+  const ehArquivo = ROTA_ARQUIVOS.test(caminho);
   const ehEmpresas = ROTA_EMPRESAS.test(caminho);
-  if (!ROTA_PERMITIDA.test(caminho) && !(ehEmpresas && ['GET', 'PUT'].includes(req.method))) return responderJson(res, 400, { erro: 'rota_invalida', mensagem: 'Rota não permitida pelo intermediário.' });
+  if (!ROTA_PERMITIDA.test(caminho) && !(ehEmpresas && ['GET', 'PUT'].includes(req.method)) && !(ehArquivo && req.method === 'GET')) return responderJson(res, 400, { erro: 'rota_invalida', mensagem: 'Rota não permitida pelo intermediário.' });
   if (!['GET', 'POST', 'PUT', 'DELETE'].includes(req.method)) return responderJson(res, 405, { erro: 'metodo_invalido', mensagem: 'Método não permitido.' });
   if (req.headers['x-paptech-chave'] !== CHAVE) {
     return responderJson(res, 401, { erro: 'chave_intermediario_invalida', mensagem: 'Chave do intermediário inválida.' });

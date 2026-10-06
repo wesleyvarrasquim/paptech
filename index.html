@@ -3316,6 +3316,7 @@ function renderNotasFiscais() {
   container.innerHTML = `
     <div class="section-header">
       <h1>Notas Fiscais</h1>
+      <button type="button" class="btn-primary" onclick="abrirExportarXmlNotas()" title="Baixa o XML das notas do período em um .zip para enviar à contabilidade">📦 Exportar XML para contabilidade</button>
     </div>
     <div class="filtro-periodo-caixa">
       <label>Filtrar por status:</label>
@@ -3360,6 +3361,167 @@ function atualizarTabelaNotasFiscais() {
   }).join('');
 
   document.getElementById('nf-tbody').innerHTML = linhas || '<tr><td colspan="7" class="vazio">Nenhuma nota fiscal emitida ou cancelada ainda.</td></tr>';
+}
+
+/* ---------- exportar XML das notas para a contabilidade ---------- */
+
+/* Gerador de ZIP mínimo (sem compressão), para não depender de biblioteca externa. */
+const TABELA_CRC32 = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+
+function crc32(bytes) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) c = TABELA_CRC32[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+/* arquivos: [{ nome, conteudo (string ou Uint8Array) }] → Uint8Array do .zip */
+function criarZip(arquivos) {
+  const enc = new TextEncoder();
+  const agora = new Date();
+  const dosHora = (agora.getHours() << 11) | (agora.getMinutes() << 5) | (agora.getSeconds() >> 1);
+  const dosData = ((agora.getFullYear() - 1980) << 9) | ((agora.getMonth() + 1) << 5) | agora.getDate();
+  const partes = [];
+  const central = [];
+  let deslocamento = 0;
+  const u16 = n => [n & 0xFF, (n >>> 8) & 0xFF];
+  const u32 = n => [n & 0xFF, (n >>> 8) & 0xFF, (n >>> 16) & 0xFF, (n >>> 24) & 0xFF];
+  arquivos.forEach(a => {
+    const nome = enc.encode(a.nome);
+    const dados = typeof a.conteudo === 'string' ? enc.encode(a.conteudo) : a.conteudo;
+    const crc = crc32(dados);
+    const comum = [...u16(20), ...u16(0x0800), ...u16(0), ...u16(dosHora), ...u16(dosData), ...u32(crc), ...u32(dados.length), ...u32(dados.length), ...u16(nome.length), ...u16(0)];
+    const local = new Uint8Array([0x50, 0x4B, 0x03, 0x04, ...comum, ...nome]);
+    partes.push(local, dados);
+    central.push(new Uint8Array([0x50, 0x4B, 0x01, 0x02, ...u16(20), ...comum, ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(deslocamento), ...nome]));
+    deslocamento += local.length + dados.length;
+  });
+  const tamanhoCentral = central.reduce((s, p) => s + p.length, 0);
+  const fim = new Uint8Array([0x50, 0x4B, 0x05, 0x06, ...u16(0), ...u16(0), ...u16(arquivos.length), ...u16(arquivos.length), ...u32(tamanhoCentral), ...u32(deslocamento), ...u16(0)]);
+  const todos = [...partes, ...central, fim];
+  const total = todos.reduce((s, p) => s + p.length, 0);
+  const saida = new Uint8Array(total);
+  let pos = 0;
+  todos.forEach(p => { saida.set(p, pos); pos += p.length; });
+  return saida;
+}
+
+/* Baixa um XML/PDF já emitido pela Focus, passando pelo intermediário (evita bloqueio de CORS). */
+async function baixarArquivoFocusTexto(caminho, ambiente) {
+  const cfg = configNfe();
+  const base = urlIntermediarioNfe(cfg);
+  if (!base) throw new Error('O intermediário de NF-e não está configurado.');
+  let rota = String(caminho || '');
+  if (/^https?:\/\//i.test(rota)) rota = new URL(rota).pathname;
+  const headers = {
+    'X-Ambiente': ambiente === 'producao' ? 'producao' : 'homologacao',
+    'X-Paptech-Chave': chaveIntermediarioNfe(),
+  };
+  if (cfg.conexao === 'supabase' && SUPABASE_ANON_KEY) {
+    headers.Authorization = 'Bearer ' + SUPABASE_ANON_KEY;
+    headers.apikey = SUPABASE_ANON_KEY;
+  }
+  const resposta = await fetch(base + rota, { method: 'GET', headers });
+  if (!resposta.ok) throw new Error('HTTP ' + resposta.status);
+  return resposta.text();
+}
+
+function abrirExportarXmlNotas() {
+  const hoje = dataHojeLocalIso();
+  abrirModal(`
+    <h2>Exportar XML para a contabilidade</h2>
+    <div class="aviso">Gera um arquivo .zip com o XML de cada nota autorizada no período (e o XML de cancelamento das canceladas), mais uma planilha-resumo. Os XMLs são baixados da Focus NFe — é preciso estar com a internet e o intermediário configurados.</div>
+    <div class="campos-empresa-grid">
+      <div class="campo"><label>Data de emissão — de</label><input type="date" id="exp-xml-de" value="${hoje.slice(0, 8)}01"></div>
+      <div class="campo"><label>até</label><input type="date" id="exp-xml-ate" value="${hoje}"></div>
+      <div class="campo campo-checkbox campo-span-2"><label><input type="checkbox" id="exp-xml-canceladas" checked> Incluir notas canceladas (XML da nota e do cancelamento)</label></div>
+      <div class="campo campo-checkbox campo-span-2"><label><input type="checkbox" id="exp-xml-homolog"> Incluir notas de homologação (teste, sem valor fiscal)</label></div>
+    </div>
+    <div id="exp-xml-status" class="nfe-status" style="display:none"></div>
+    <div class="modal-botoes">
+      <button type="button" class="btn-primary" id="exp-xml-botao" onclick="exportarXmlNotas()">📦 Gerar .zip</button>
+      <button type="button" class="btn-secondary" onclick="fecharModal()">Fechar</button>
+    </div>
+  `);
+}
+
+async function exportarXmlNotas() {
+  const de = document.getElementById('exp-xml-de').value;
+  const ate = document.getElementById('exp-xml-ate').value;
+  const comCanceladas = document.getElementById('exp-xml-canceladas').checked;
+  const comHomolog = document.getElementById('exp-xml-homolog').checked;
+  const status = document.getElementById('exp-xml-status');
+  const botao = document.getElementById('exp-xml-botao');
+  const mostrar = (txt, tipo) => { status.style.display = 'block'; status.className = 'nfe-status nfe-status-' + (tipo || 'info'); status.innerHTML = escapeHtml(txt).replace(/\n/g, '<br>'); };
+  if (!de || !ate || de > ate) { mostrar('Informe um período válido.', 'erro'); return; }
+
+  const clientes = loadList('clientes');
+  const notas = loadList('vendas').filter(v =>
+    (v.status_nf === 'Emitida' || (comCanceladas && v.status_nf === 'Cancelada')) &&
+    v.data_emissao_nf && v.data_emissao_nf >= de && v.data_emissao_nf <= ate &&
+    (comHomolog || v.nfe_ambiente !== 'homologacao')
+  ).sort((a, b) => (a.data_emissao_nf || '').localeCompare(b.data_emissao_nf || ''));
+  if (!notas.length) { mostrar('Nenhuma nota encontrada nesse período.', 'erro'); return; }
+
+  botao.disabled = true;
+  const arquivos = [];
+  const linhasCsv = [['Número', 'Série', 'Data emissão', 'Cliente', 'Valor', 'Situação', 'Chave de acesso', 'Arquivo XML'].join(';')];
+  const falhas = [];
+  const cel = x => '"' + String(x == null ? '' : x).replace(/"/g, '""') + '"';
+
+  for (let i = 0; i < notas.length; i++) {
+    const v = notas[i];
+    const cliente = clientes.find(c => c.id === v.cliente_id);
+    const rotulo = `${v.numero_nf || v.id}`;
+    mostrar(`Baixando ${i + 1} de ${notas.length} (nota ${rotulo})...`);
+    const chave = somenteDigitos(v.chave_nfe);
+    const base = chave || `nota-${v.numero_nf || v.id}`;
+    let arquivoXml = '';
+    if (!v.nfe_caminho_xml) {
+      falhas.push(`Nota ${rotulo}: sem XML (foi registrada manualmente ou emitida em outro sistema).`);
+    } else {
+      try {
+        const xml = await baixarArquivoFocusTexto(v.nfe_caminho_xml, v.nfe_ambiente);
+        arquivoXml = `XMLs/${base}-nfe.xml`;
+        arquivos.push({ nome: arquivoXml, conteudo: xml });
+        if (v.status_nf === 'Cancelada' && v.nfe_caminho_xml_cancelamento) {
+          try {
+            const xmlCanc = await baixarArquivoFocusTexto(v.nfe_caminho_xml_cancelamento, v.nfe_ambiente);
+            arquivos.push({ nome: `Cancelamentos/${base}-cancelamento.xml`, conteudo: xmlCanc });
+          } catch (e) { falhas.push(`Nota ${rotulo}: XML de cancelamento não baixou (${e.message}).`); }
+        }
+      } catch (e) {
+        falhas.push(`Nota ${rotulo}: não foi possível baixar o XML (${e.message}).`);
+      }
+    }
+    linhasCsv.push([v.numero_nf, v.serie_nf, formatarDataBr(v.data_emissao_nf), cliente ? cliente.razao_social : (v.origem === 'pdv' ? 'Consumidor Final' : ''),
+      (Number(v.valor_total) || 0).toFixed(2).replace('.', ','), v.status_nf, chave, arquivoXml].map(cel).join(';'));
+  }
+
+  if (!arquivos.length) {
+    mostrar('Nenhum XML pôde ser baixado.\n' + falhas.join('\n'), 'erro');
+    botao.disabled = false;
+    return;
+  }
+  arquivos.push({ nome: 'resumo.csv', conteudo: '\uFEFF' + linhasCsv.join('\r\n') + '\r\n' });
+  const zip = criarZip(arquivos);
+  const url = URL.createObjectURL(new Blob([zip], { type: 'application/zip' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `xml-notas-fiscais_${de}_a_${ate}.zip`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  mostrar(`Pronto: ${arquivos.length - 1} XML(s) no arquivo .zip.` + (falhas.length ? `\n\nAtenção:\n${falhas.join('\n')}` : ''), falhas.length ? 'info' : 'ok');
+  botao.disabled = false;
 }
 
 function verItensVenda(id) {
