@@ -1775,6 +1775,227 @@ function estoqueBadge(p) {
   return String(atual);
 }
 
+/* ---------- etiqueta de produto (código interno, descrição, locação e código de barras) ---------- */
+
+/* Padrões do Code 128 (largura de barra/espaço alternadas, 11 módulos cada; o último é o de parada). */
+const CODE128_PADROES = [
+  '212222', '222122', '222221', '121223', '121322', '131222', '122213', '122312', '132212', '221213',
+  '221312', '231212', '112232', '122132', '122231', '113222', '123122', '123221', '223211', '221132',
+  '221231', '213212', '223112', '312131', '311222', '321122', '321221', '312212', '322112', '322211',
+  '212123', '212321', '232121', '111323', '131123', '131321', '112313', '132113', '132311', '211313',
+  '231113', '231311', '112133', '112331', '132131', '113123', '113321', '133121', '313121', '211331',
+  '231131', '213113', '213311', '213131', '311123', '311321', '331121', '312113', '312311', '332111',
+  '314111', '221411', '431111', '111224', '111422', '121124', '121421', '141122', '141221', '112214',
+  '112412', '122114', '122411', '142112', '142211', '241211', '221114', '413111', '241112', '134111',
+  '111242', '121142', '121241', '114212', '124112', '124211', '411212', '421112', '421211', '212141',
+  '214121', '412121', '111143', '111341', '131141', '114113', '114311', '411113', '411311', '113141',
+  '114131', '311141', '411131', '211412', '211214', '211232', '2331112',
+];
+
+function textoSeguroCode128(texto) {
+  return String(texto == null ? '' : texto).normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^\x20-\x7E]/g, '-');
+}
+
+/* Devolve os módulos do Code 128 como texto de 0/1 (1 = barra). Usa o conjunto C (mais compacto)
+   quando o texto é só de dígitos com tamanho par; senão usa o conjunto B (ASCII). */
+function modulosCode128(textoOriginal) {
+  const texto = textoSeguroCode128(textoOriginal);
+  const codigos = [];
+  if (/^\d{4,}$/.test(texto) && texto.length % 2 === 0) {
+    codigos.push(105);
+    for (let i = 0; i < texto.length; i += 2) codigos.push(parseInt(texto.slice(i, i + 2), 10));
+  } else {
+    codigos.push(104);
+    for (const ch of texto) codigos.push(ch.charCodeAt(0) - 32);
+  }
+  let soma = codigos[0];
+  for (let i = 1; i < codigos.length; i++) soma += codigos[i] * i;
+  codigos.push(soma % 103, 106);
+  let saida = '';
+  codigos.forEach(c => {
+    let barra = true;
+    for (const largura of CODE128_PADROES[c]) {
+      saida += (barra ? '1' : '0').repeat(Number(largura));
+      barra = !barra;
+    }
+  });
+  return saida;
+}
+
+const EAN_L = ['0001101', '0011001', '0010011', '0111101', '0100011', '0110001', '0101111', '0111011', '0110111', '0001011'];
+const EAN_G = ['0100111', '0110011', '0011011', '0100001', '0011101', '0111001', '0000101', '0010001', '0001001', '0010111'];
+const EAN_R = EAN_L.map(p => p.replace(/[01]/g, d => (d === '0' ? '1' : '0')));
+const EAN_PARIDADE = ['LLLLLL', 'LLGLGG', 'LLGGLG', 'LLGGGL', 'LGLLGG', 'LGGLLG', 'LGGGLL', 'LGLGLG', 'LGLGGL', 'LGGLGL'];
+
+function digitoVerificadorEan(corpo) {
+  let soma = 0;
+  for (let i = 0; i < corpo.length; i++) {
+    const d = Number(corpo[corpo.length - 1 - i]);
+    soma += d * (i % 2 === 0 ? 3 : 1);
+  }
+  return (10 - (soma % 10)) % 10;
+}
+
+/* Aceita EAN-13, UPC-A (12 dígitos, vira EAN-13 com 0 na frente) e EAN-8 com dígito verificador certo. */
+function normalizarEan(texto) {
+  let d = String(texto || '').replace(/\D/g, '');
+  if (d.length === 12) d = '0' + d;
+  if (![8, 13].includes(d.length)) return '';
+  return digitoVerificadorEan(d.slice(0, -1)) === Number(d[d.length - 1]) ? d : '';
+}
+
+function modulosEan(digitos) {
+  if (digitos.length === 13) {
+    const paridade = EAN_PARIDADE[Number(digitos[0])];
+    let m = '101';
+    for (let i = 0; i < 6; i++) m += (paridade[i] === 'L' ? EAN_L : EAN_G)[Number(digitos[i + 1])];
+    m += '01010';
+    for (let i = 7; i < 13; i++) m += EAN_R[Number(digitos[i])];
+    return m + '101';
+  }
+  let m = '101';
+  for (let i = 0; i < 4; i++) m += EAN_L[Number(digitos[i])];
+  m += '01010';
+  for (let i = 4; i < 8; i++) m += EAN_R[Number(digitos[i])];
+  return m + '101';
+}
+
+/* Desenha os módulos como SVG (com margem silenciosa de 10 módulos de cada lado). */
+function svgCodigoBarras(modulos) {
+  const margem = 10;
+  const retangulos = [];
+  let i = 0;
+  while (i < modulos.length) {
+    if (modulos[i] === '1') {
+      let j = i;
+      while (j < modulos.length && modulos[j] === '1') j++;
+      retangulos.push(`<rect x="${i + margem}" y="0" width="${j - i}" height="100"/>`);
+      i = j;
+    } else i++;
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${modulos.length + margem * 2} 100" preserveAspectRatio="none" shape-rendering="crispEdges" fill="#000"><rect x="0" y="0" width="${modulos.length + margem * 2}" height="100" fill="#fff"/>${retangulos.join('')}</svg>`;
+}
+
+/* Define o que vai no código de barras: GTIN/EAN do cadastro (se válido) ou o código interno. */
+function dadosCodigoBarrasProduto(produto, fonte) {
+  const ean = normalizarEan(produto.gtin_venda);
+  const interno = String(produto.cod_interno || produto.cod_original || '').trim();
+  if (fonte !== 'interno' && ean) return { valor: ean, modulos: modulosEan(ean), tipo: 'EAN' };
+  const valor = interno || String(produto.gtin_venda || '').trim();
+  return valor ? { valor, modulos: modulosCode128(valor), tipo: 'Code128' } : null;
+}
+
+function htmlEtiquetaProduto(produto, opcoes) {
+  const larg = opcoes.largura, alt = opcoes.altura;
+  const cb = dadosCodigoBarrasProduto(produto, opcoes.fonte);
+  const interno = String(produto.cod_interno || produto.cod_original || '-');
+  const base = Math.max(6, Math.min(alt / 3.2, larg / 6)); // tamanho de fonte-base em pt, proporcional à etiqueta
+  return `
+    <div class="etq" style="width:${larg}mm;height:${alt}mm;">
+      <div class="etq-topo">
+        <span class="etq-cod" style="font-size:${(base * 1.25).toFixed(1)}pt">${escapeHtml(interno)}</span>
+        <span class="etq-loc" style="font-size:${(base * 1.05).toFixed(1)}pt">${produto.localizacao ? 'LOC: ' + escapeHtml(produto.localizacao) : ''}</span>
+      </div>
+      <div class="etq-desc" style="font-size:${base.toFixed(1)}pt">${escapeHtml(produto.descricao || '')}</div>
+      <div class="etq-barras">${cb ? svgCodigoBarras(cb.modulos) : '<em style="font-size:7pt">sem código de barras</em>'}</div>
+      <div class="etq-num" style="font-size:${(base * 0.9).toFixed(1)}pt">${cb ? escapeHtml(cb.valor) : ''}</div>
+    </div>`;
+}
+
+const ETIQUETA_CSS = `
+  .etq { box-sizing: border-box; padding: 1.2mm 1.5mm; display: flex; flex-direction: column; overflow: hidden; background: #fff; color: #000; font-family: Arial, Helvetica, sans-serif; }
+  .etq-topo { display: flex; justify-content: space-between; align-items: baseline; gap: 2mm; }
+  .etq-cod { font-weight: 800; white-space: nowrap; }
+  .etq-loc { font-weight: 700; white-space: nowrap; }
+  .etq-desc { line-height: 1.12; max-height: 2.3em; overflow: hidden; margin-top: .3mm; }
+  .etq-barras { flex: 1 1 0; min-height: 0; margin-top: .6mm; position: relative; }
+  .etq-barras svg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: block; }
+  .etq-topo, .etq-desc, .etq-num { flex: 0 0 auto; }
+  .etq-num { text-align: center; letter-spacing: .15em; line-height: 1.1; }
+`;
+
+function abrirEtiquetaProduto(produtoId) {
+  const produto = loadList('produtos').find(p => p.id === produtoId);
+  if (!produto) return;
+  const temEan = !!normalizarEan(produto.gtin_venda);
+  abrirModal(`
+    <h2>Etiqueta — ${escapeHtml(produto.descricao)}</h2>
+    <style>${ETIQUETA_CSS} #etq-previa .etq { border: 1px dashed #999; }</style>
+    <div class="campos-empresa-grid">
+      <div class="campo"><label>Quantidade de etiquetas</label><input type="number" id="etq-qtd" min="1" max="500" value="1" onchange="atualizarPreviaEtiqueta(${produto.id})"></div>
+      <div class="campo"><label>Tamanho (largura × altura, mm)</label>
+        <select id="etq-tam" onchange="atualizarPreviaEtiqueta(${produto.id})">
+          <option value="50x30">50 × 30 mm</option>
+          <option value="40x25">40 × 25 mm</option>
+          <option value="60x40">60 × 40 mm</option>
+          <option value="100x50">100 × 50 mm</option>
+          <option value="100x30">100 × 30 mm</option>
+          <option value="outro">Outro…</option>
+        </select>
+      </div>
+      <div class="campo" id="etq-outro" style="display:none"><label>Largura × altura (mm)</label>
+        <div style="display:flex;gap:6px"><input type="number" id="etq-larg" min="20" max="150" value="50" onchange="atualizarPreviaEtiqueta(${produto.id})"> <input type="number" id="etq-alt" min="15" max="150" value="30" onchange="atualizarPreviaEtiqueta(${produto.id})"></div>
+      </div>
+      <div class="campo"><label>Código de barras</label>
+        <select id="etq-fonte" onchange="atualizarPreviaEtiqueta(${produto.id})">
+          ${temEan ? '<option value="gtin">GTIN/EAN do cadastro</option>' : ''}
+          <option value="interno" ${temEan ? '' : 'selected'}>Código interno (Code 128)</option>
+        </select>
+      </div>
+    </div>
+    ${!temEan ? '<div class="aviso">Este produto não tem GTIN/EAN válido cadastrado; a etiqueta usa o código interno no código de barras.</div>' : ''}
+    <div id="etq-previa" style="margin:10px 0;overflow:auto"></div>
+    <div class="modal-botoes">
+      <button type="button" class="btn-primary" onclick="imprimirEtiquetaProduto(${produto.id})">🖨️ Imprimir</button>
+      <button type="button" class="btn-secondary" onclick="fecharModal()">Fechar</button>
+    </div>
+  `);
+  atualizarPreviaEtiqueta(produto.id);
+}
+
+function opcoesEtiquetaDaTela() {
+  let tam = document.getElementById('etq-tam').value;
+  document.getElementById('etq-outro').style.display = tam === 'outro' ? '' : 'none';
+  let largura, altura;
+  if (tam === 'outro') {
+    largura = Math.min(150, Math.max(20, Number(document.getElementById('etq-larg').value) || 50));
+    altura = Math.min(150, Math.max(15, Number(document.getElementById('etq-alt').value) || 30));
+  } else [largura, altura] = tam.split('x').map(Number);
+  return {
+    largura, altura,
+    fonte: document.getElementById('etq-fonte').value,
+    quantidade: Math.min(500, Math.max(1, Math.floor(Number(document.getElementById('etq-qtd').value) || 1))),
+  };
+}
+
+function atualizarPreviaEtiqueta(produtoId) {
+  const produto = loadList('produtos').find(p => p.id === produtoId);
+  if (!produto) return;
+  document.getElementById('etq-previa').innerHTML = htmlEtiquetaProduto(produto, opcoesEtiquetaDaTela());
+}
+
+/* Cada etiqueta sai em uma página do tamanho exato dela (impressoras térmicas de etiqueta). */
+function imprimirEtiquetaProduto(produtoId) {
+  const produto = loadList('produtos').find(p => p.id === produtoId);
+  if (!produto) return;
+  const o = opcoesEtiquetaDaTela();
+  const w = window.open('', '_blank', 'width=520,height=420');
+  if (!w) { alert('O navegador bloqueou a janela de impressão. Libere pop-ups para este site.'); return; }
+  const uma = htmlEtiquetaProduto(produto, o);
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Etiqueta ${escapeHtml(produto.cod_interno || produto.descricao)}</title>
+    <style>
+      @page { size: ${o.largura}mm ${o.altura}mm; margin: 0; }
+      html, body { margin: 0; padding: 0; }
+      .pagina { width: ${o.largura}mm; height: ${o.altura}mm; page-break-after: always; break-after: page; overflow: hidden; }
+      .pagina:last-child { page-break-after: auto; break-after: auto; }
+      ${ETIQUETA_CSS}
+      @media screen { body { background: #ddd; } .pagina { margin: 6px auto; background: #fff; } }
+    </style></head><body>${Array.from({ length: o.quantidade }, () => `<div class="pagina">${uma}</div>`).join('')}
+    <script>window.onload = function () { window.print(); }<\/script></body></html>`);
+  w.document.close();
+}
+
 function renderProdutos() {
   const container = document.getElementById('sec-produtos');
   const podeEditarProdutos = podeCadastrar('produtos');
@@ -1830,6 +2051,7 @@ function atualizarTabelaProdutos() {
       <td class="acoes" onclick="event.stopPropagation()">
         <button onclick="abrirFormProduto(${p.id})" title="${podeEditarProdutos ? 'Ver / Editar todos os dados' : 'Ver dados completos'}">${podeEditarProdutos ? '&#9998;' : '&#128065;'}</button>
         <button onclick="abrirUltimoMovimentoProduto(${p.id})" title="Ver última compra, última venda e devolução ao fornecedor">&#128337;</button>
+        <button onclick="abrirEtiquetaProduto(${p.id})" title="Imprimir etiqueta com código interno, descrição, locação e código de barras">&#127991;</button>
         ${podeEditarProdutos ? `
           <button onclick="clonarProduto(${p.id})" title="Clonar item">&#128203;</button>
           <button onclick="abrirMovimentoEstoque(${p.id})" title="Movimentar estoque">&#128230;</button>
