@@ -129,6 +129,9 @@
   .login-subtitulo { text-align: center; color: var(--texto-suave); font-size: 13px; margin-bottom: 22px; }
   .login-erro { color: var(--perigo); font-size: 13px; min-height: 18px; margin: 4px 0 8px; text-align: center; }
   .login-botao { width: 100%; margin-top: 6px; }
+  .login-captcha { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .login-captcha canvas { border: 1px solid var(--borda); border-radius: 8px; background: #fff; max-width: 100%; }
+  .login-captcha-novo { padding: 6px 10px; font-size: 16px; }
   .login-dica { margin-top: 16px; font-size: 11.5px; color: var(--texto-suave); text-align: center; }
   .login-dica:hover { text-decoration: underline; color: var(--accent); }
 
@@ -340,9 +343,31 @@
       <label>Senha</label>
       <input type="password" id="login-senha" autocomplete="current-password" required>
     </div>
+    <div class="campo">
+      <label>Digite os caracteres da imagem</label>
+      <div class="login-captcha">
+        <canvas id="login-captcha-img" width="150" height="48" aria-label="Imagem com caracteres de verificação"></canvas>
+        <button type="button" class="btn-secondary login-captcha-novo" onclick="gerarCaptchaLogin()" title="Gerar outra imagem">&#8635;</button>
+      </div>
+      <input type="text" id="login-captcha" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="5" required>
+    </div>
     <div id="login-erro" class="login-erro"></div>
-    <button type="submit" class="btn-primary login-botao">Entrar</button>
+    <button type="submit" class="btn-primary login-botao" id="login-botao">Entrar</button>
     <p class="login-dica" style="cursor:pointer" onclick="sairDaLicenca()">Trocar código de ativação</p>
+  </form>
+  <form class="login-card" id="login-troca" style="display:none" onsubmit="return confirmarTrocaSenhaLogin(event)">
+    <div class="login-logo">PAP<span>TECH</span></div>
+    <p class="login-subtitulo">Por segurança, crie uma nova senha para continuar.</p>
+    <div class="campo">
+      <label>Nova senha (mín. 8 caracteres, com letras e números)</label>
+      <input type="password" id="troca-senha-1" autocomplete="new-password" required>
+    </div>
+    <div class="campo">
+      <label>Repita a nova senha</label>
+      <input type="password" id="troca-senha-2" autocomplete="new-password" required>
+    </div>
+    <div id="troca-erro" class="login-erro"></div>
+    <button type="submit" class="btn-primary login-botao">Salvar nova senha</button>
   </form>
 </div>
 
@@ -751,6 +776,7 @@ function inicializarUsuariosPadrao() {
       nome: 'Administrador',
       login: 'admin',
       senha: 'admin',
+      trocar_senha: true,
       nivel: 'Administrador',
       status: 'Ativo',
       permissoes: permissoesTotais(),
@@ -1041,41 +1067,283 @@ async function excluirLicenca(codigo) {
   }
 }
 
+/* ---------- segurança do login: senha com hash, captcha e bloqueio por tentativas ---------- */
+
+const LOGIN_MAX_FALHAS = 5;          // erros seguidos antes de bloquear
+const LOGIN_BLOQUEIO_BASE_MIN = 5;   // 1º bloqueio: 5 min; depois 10, 20, 40... (máx. 60)
+const LOGIN_BLOQUEIO_MAX_MIN = 60;
+const CAPTCHA_CARACTERES = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // sem I, O, 0, 1 (evita confusão)
+let captchaLoginAtual = '';
+let temporizadorBloqueioLogin = null;
+let usuarioTrocaSenhaPendente = null;
+
+function chaveBloqueioLogin() {
+  return 'paptech_login_bloqueio::' + (licencaAtual || 'sem_licenca');
+}
+
+function lerBloqueioLogin() {
+  try {
+    const dados = JSON.parse(localStorage.getItem(chaveBloqueioLogin()) || '{}');
+    return { falhas: Number(dados.falhas) || 0, nivel: Number(dados.nivel) || 0, ate: Number(dados.ate) || 0 };
+  } catch (e) { return { falhas: 0, nivel: 0, ate: 0 }; }
+}
+
+function gravarBloqueioLogin(estado) {
+  try { localStorage.setItem(chaveBloqueioLogin(), JSON.stringify(estado)); } catch (e) { /* sem armazenamento */ }
+}
+
+/* Registra uma senha errada. Devolve o estado novo (com "ate" preenchido quando bloqueou). */
+function registrarFalhaLogin(agora) {
+  const estado = lerBloqueioLogin();
+  estado.falhas += 1;
+  if (estado.falhas >= LOGIN_MAX_FALHAS) {
+    estado.nivel += 1;
+    const minutos = Math.min(LOGIN_BLOQUEIO_BASE_MIN * Math.pow(2, estado.nivel - 1), LOGIN_BLOQUEIO_MAX_MIN);
+    estado.ate = agora + minutos * 60000;
+    estado.falhas = 0;
+  }
+  gravarBloqueioLogin(estado);
+  return estado;
+}
+
+function limparBloqueioLogin() {
+  try { localStorage.removeItem(chaveBloqueioLogin()); } catch (e) { /* ignora */ }
+}
+
+function textoTempoRestante(ms) {
+  const total = Math.max(1, Math.ceil(ms / 1000));
+  const m = Math.floor(total / 60), sg = total % 60;
+  return m > 0 ? `${m} min ${String(sg).padStart(2, '0')} s` : `${sg} s`;
+}
+
+/* Se o login está bloqueado, mostra a contagem regressiva e desabilita o botão. */
+function atualizarEstadoBloqueioLogin() {
+  const botao = document.getElementById('login-botao');
+  const erro = document.getElementById('login-erro');
+  if (!botao || !erro) return false;
+  clearInterval(temporizadorBloqueioLogin);
+  const restante = lerBloqueioLogin().ate - Date.now();
+  if (restante <= 0) { botao.disabled = false; return false; }
+  botao.disabled = true;
+  const mostrar = () => {
+    const falta = lerBloqueioLogin().ate - Date.now();
+    if (falta <= 0) {
+      clearInterval(temporizadorBloqueioLogin);
+      botao.disabled = false;
+      erro.textContent = '';
+      return;
+    }
+    erro.textContent = `Muitas tentativas erradas. Tente novamente em ${textoTempoRestante(falta)}.`;
+  };
+  mostrar();
+  temporizadorBloqueioLogin = setInterval(mostrar, 1000);
+  return true;
+}
+
+function gerarTextoCaptcha() {
+  const bytes = new Uint8Array(5);
+  (window.crypto || window.msCrypto).getRandomValues(bytes);
+  return Array.from(bytes, b => CAPTCHA_CARACTERES[b % CAPTCHA_CARACTERES.length]).join('');
+}
+
+function gerarCaptchaLogin() {
+  captchaLoginAtual = gerarTextoCaptcha();
+  const canvas = document.getElementById('login-captcha-img');
+  const campo = document.getElementById('login-captcha');
+  if (campo) campo.value = '';
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const rnd = (min, max) => min + Math.random() * (max - min);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const fundo = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+  fundo.addColorStop(0, '#eef4ee');
+  fundo.addColorStop(1, '#f7f1e6');
+  ctx.fillStyle = fundo;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  for (let i = 0; i < 7; i++) {            // linhas de ruído
+    ctx.strokeStyle = `rgba(${Math.floor(rnd(60, 150))},${Math.floor(rnd(60, 150))},${Math.floor(rnd(60, 150))},0.55)`;
+    ctx.lineWidth = rnd(1, 2.2);
+    ctx.beginPath();
+    ctx.moveTo(rnd(0, canvas.width), rnd(0, canvas.height));
+    ctx.bezierCurveTo(rnd(0, canvas.width), rnd(0, canvas.height), rnd(0, canvas.width), rnd(0, canvas.height), rnd(0, canvas.width), rnd(0, canvas.height));
+    ctx.stroke();
+  }
+  const passo = canvas.width / (captchaLoginAtual.length + 0.6);
+  for (let i = 0; i < captchaLoginAtual.length; i++) {
+    ctx.save();
+    ctx.translate(passo * (i + 0.8) + rnd(-3, 3), canvas.height / 2 + rnd(-5, 5));
+    ctx.rotate(rnd(-0.45, 0.45));
+    ctx.font = `bold ${Math.floor(rnd(26, 34))}px Arial, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = `rgb(${Math.floor(rnd(20, 110))},${Math.floor(rnd(20, 110))},${Math.floor(rnd(20, 110))})`;
+    ctx.fillText(captchaLoginAtual[i], 0, 0);
+    ctx.restore();
+  }
+  for (let i = 0; i < 60; i++) {           // pontinhos
+    ctx.fillStyle = `rgba(${Math.floor(rnd(0, 120))},${Math.floor(rnd(0, 120))},${Math.floor(rnd(0, 120))},0.5)`;
+    ctx.fillRect(rnd(0, canvas.width), rnd(0, canvas.height), 1.6, 1.6);
+  }
+}
+
+/* Hash de senha: PBKDF2-SHA256 (100 mil voltas) com sal aleatório por usuário. */
+function bytesParaHex(bytes) { return Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2, '0')).join(''); }
+
+function gerarSalSenha() {
+  const sal = new Uint8Array(16);
+  crypto.getRandomValues(sal);
+  return bytesParaHex(sal);
+}
+
+async function hashSenha(senha, salHex) {
+  if (!(window.crypto && crypto.subtle)) throw new Error('Este navegador não oferece criptografia segura (use HTTPS ou um navegador atualizado).');
+  const chave = await crypto.subtle.importKey('raw', new TextEncoder().encode(senha), 'PBKDF2', false, ['deriveBits']);
+  const sal = new Uint8Array(salHex.match(/.{2}/g).map(h => parseInt(h, 16)));
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: sal, iterations: 100000, hash: 'SHA-256' }, chave, 256);
+  return bytesParaHex(bits);
+}
+
+async function conferirSenhaUsuario(usuario, senha) {
+  if (usuario.senha_hash && usuario.senha_sal) {
+    return (await hashSenha(senha, usuario.senha_sal)) === usuario.senha_hash;
+  }
+  return typeof usuario.senha === 'string' && usuario.senha === senha;   // usuário antigo (texto puro), migrado no 1º login
+}
+
+/* Troca a senha de um registro de usuário por uma versão com hash (remove o texto puro). */
+async function aplicarSenhaComHash(usuario, senhaNova) {
+  const sal = gerarSalSenha();
+  usuario.senha_hash = await hashSenha(senhaNova, sal);
+  usuario.senha_sal = sal;
+  delete usuario.senha;
+  delete usuario.trocar_senha;
+}
+
+/* Regras para uma senha nova. Devolve a mensagem de erro, ou '' se está boa. */
+function validarSenhaNova(senha, login) {
+  if (senha.length < 8) return 'A senha precisa ter ao menos 8 caracteres.';
+  if (!/[A-Za-z]/.test(senha) || !/\d/.test(senha)) return 'Use letras e números na senha.';
+  const baixa = senha.toLowerCase();
+  if (baixa === String(login || '').toLowerCase() || ['admin', 'admin123', '12345678', 'senha123', 'paptech123'].includes(baixa)) return 'Escolha uma senha menos óbvia.';
+  return '';
+}
+
 function mostrarTelaLogin(mensagemErro) {
   document.getElementById('app-principal').style.display = 'none';
   document.getElementById('tela-ativacao').style.display = 'none';
   document.getElementById('tela-painel-admin').style.display = 'none';
+  document.getElementById('login-troca').style.display = 'none';
+  usuarioTrocaSenhaPendente = null;
   const tela = document.getElementById('tela-login');
   tela.style.display = 'flex';
+  const formLogin = tela.querySelector('form');
+  formLogin.style.display = '';
   document.getElementById('login-erro').textContent = mensagemErro || '';
   const campoUsuario = document.getElementById('login-usuario');
   const campoSenha = document.getElementById('login-senha');
   campoUsuario.value = '';
   campoSenha.value = '';
+  gerarCaptchaLogin();
+  atualizarEstadoBloqueioLogin();
   setTimeout(() => campoUsuario.focus(), 50);
 }
 
 function ocultarTelaLogin() {
+  clearInterval(temporizadorBloqueioLogin);
   document.getElementById('tela-login').style.display = 'none';
   document.getElementById('app-principal').style.display = 'flex';
 }
 
-function tentarLogin(event) {
+async function tentarLogin(event) {
   event.preventDefault();
+  const erro = document.getElementById('login-erro');
+  if (atualizarEstadoBloqueioLogin()) return false;
+
+  // 1) Captcha primeiro: se errar, a senha nem é conferida e a tentativa não conta como falha.
+  const digitado = document.getElementById('login-captcha').value.trim().toUpperCase();
+  if (!captchaLoginAtual || digitado !== captchaLoginAtual) {
+    erro.textContent = 'Caracteres da imagem incorretos. Tente de novo.';
+    gerarCaptchaLogin();
+    return false;
+  }
+
   const login = document.getElementById('login-usuario').value.trim();
   const senha = document.getElementById('login-senha').value;
   const usuario = loadList('usuarios').find(u => (u.login || '').toLowerCase() === login.toLowerCase());
 
-  if (!usuario || usuario.senha !== senha) {
-    document.getElementById('login-erro').textContent = 'Usuário ou senha incorretos.';
-    return false;
-  }
-  if (usuario.status === 'Inativo') {
-    document.getElementById('login-erro').textContent = 'Este usuário está inativo. Fale com um administrador.';
+  let ok = false;
+  try {
+    ok = !!usuario && await conferirSenhaUsuario(usuario, senha);
+  } catch (e) {
+    erro.textContent = e.message;
+    gerarCaptchaLogin();
     return false;
   }
 
+  if (!ok) {
+    const estado = registrarFalhaLogin(Date.now());
+    document.getElementById('login-senha').value = '';
+    gerarCaptchaLogin();
+    if (!atualizarEstadoBloqueioLogin()) {
+      const restam = LOGIN_MAX_FALHAS - estado.falhas;
+      erro.textContent = `Usuário ou senha incorretos. ${restam} tentativa(s) antes do bloqueio temporário.`;
+    }
+    return false;
+  }
+  if (usuario.status === 'Inativo') {
+    erro.textContent = 'Este usuário está inativo. Fale com um administrador.';
+    gerarCaptchaLogin();
+    return false;
+  }
+
+  limparBloqueioLogin();
+
+  // Senha padrão ("admin") ou marcada para troca: exige uma senha nova antes de entrar.
+  if (usuario.trocar_senha || (!usuario.senha_hash && usuario.senha === 'admin')) {
+    usuarioTrocaSenhaPendente = usuario.id;
+    document.getElementById('tela-login').querySelector('form').style.display = 'none';
+    document.getElementById('login-troca').style.display = '';
+    document.getElementById('troca-senha-1').value = '';
+    document.getElementById('troca-senha-2').value = '';
+    document.getElementById('troca-erro').textContent = '';
+    setTimeout(() => document.getElementById('troca-senha-1').focus(), 50);
+    return false;
+  }
+
+  // Usuário antigo com senha em texto puro: converte para hash agora que a senha foi conferida.
+  if (!usuario.senha_hash) {
+    try {
+      const lista = loadList('usuarios');
+      const alvo = lista.find(u => u.id === usuario.id);
+      await aplicarSenhaComHash(alvo, senha);
+      saveList('usuarios', lista);
+    } catch (e) { /* segue sem migrar; tenta de novo no próximo login */ }
+  }
+
   localStorage.setItem(chaveSessaoAtual(), String(usuario.id));
+  ocultarTelaLogin();
+  iniciarAppLogado();
+  return false;
+}
+
+async function confirmarTrocaSenhaLogin(event) {
+  event.preventDefault();
+  const erro = document.getElementById('troca-erro');
+  const s1 = document.getElementById('troca-senha-1').value;
+  const s2 = document.getElementById('troca-senha-2').value;
+  const lista = loadList('usuarios');
+  const alvo = lista.find(u => u.id === usuarioTrocaSenhaPendente);
+  if (!alvo) { mostrarTelaLogin(); return false; }
+  const problema = validarSenhaNova(s1, alvo.login);
+  if (problema) { erro.textContent = problema; return false; }
+  if (s1 !== s2) { erro.textContent = 'As duas senhas não são iguais.'; return false; }
+  try {
+    await aplicarSenhaComHash(alvo, s1);
+  } catch (e) { erro.textContent = e.message; return false; }
+  saveList('usuarios', lista);
+  localStorage.setItem(chaveSessaoAtual(), String(alvo.id));
+  usuarioTrocaSenhaPendente = null;
+  document.getElementById('login-troca').style.display = 'none';
   ocultarTelaLogin();
   iniciarAppLogado();
   return false;
@@ -7549,7 +7817,7 @@ function abrirFormUsuario(id) {
 
   abrirModal(`
     <h2>${registro ? 'Editar' : 'Cadastrar'} Usuário</h2>
-    <form onsubmit="return salvarUsuario(event, ${id || 'null'})">
+    <form onsubmit="salvarUsuario(event, ${id || 'null'}); return false;">
       <div class="campo">
         <label>Nome *</label>
         <input type="text" id="usuario-nome" value="${escapeHtml(registro ? registro.nome : '')}" required>
@@ -7594,7 +7862,7 @@ function abrirFormUsuario(id) {
   `);
 }
 
-function salvarUsuario(event, id) {
+async function salvarUsuario(event, id) {
   event.preventDefault();
   const nome = document.getElementById('usuario-nome').value.trim();
   const login = document.getElementById('usuario-login').value.trim();
@@ -7618,6 +7886,13 @@ function salvarUsuario(event, id) {
     alert('Informe uma senha para o novo usuário.');
     return false;
   }
+  if (senha) {
+    const problemaSenha = validarSenhaNova(senha, login);
+    if (problemaSenha) {
+      alert(problemaSenha);
+      return false;
+    }
+  }
 
   // Garante que sempre sobre pelo menos um Administrador ativo no sistema.
   const ficariaSemAdminAtivo = quantidadeAdministradoresAtivos(lista, id) === 0 && (nivel !== 'Administrador' || status === 'Inativo');
@@ -7640,11 +7915,13 @@ function salvarUsuario(event, id) {
 
   if (id) {
     const idx = lista.findIndex(u => u.id === id);
-    if (senha) dados.senha = senha;
     lista[idx] = { ...lista[idx], ...dados };
+    if (senha) {
+      try { await aplicarSenhaComHash(lista[idx], senha); } catch (e) { alert(e.message); return false; }
+    }
   } else {
     dados.id = nextId(lista);
-    dados.senha = senha;
+    try { await aplicarSenhaComHash(dados, senha); } catch (e) { alert(e.message); return false; }
     lista.push(dados);
   }
   saveList('usuarios', lista);
