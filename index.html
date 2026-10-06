@@ -4475,6 +4475,8 @@ function montarNfeVenda(venda, opcoes) {
       valor_bruto: valorBruto,
       codigo_barras_comercial: gtinValido,
       codigo_barras_tributavel: gtinValido,
+      ...(String(it.numero_pedido || '').trim() ? { numero_pedido_compra: String(it.numero_pedido).trim().slice(0, 15) } : {}),
+      ...(String(it.numero_pedido || '').trim() && /^\d{1,6}$/.test(String(it.item_pedido || '')) ? { numero_item_pedido_compra: Number(it.item_pedido) } : {}),
       inclui_no_total: 1,
       icms_origem: Number(origem),
       icms_situacao_tributaria: cst,
@@ -5634,12 +5636,14 @@ function abrirFormVendaManual(id) {
         <div class="item-linha">
           <input type="text" id="venda-item-quantidade" placeholder="Qtd." value="1">
           <input type="text" id="venda-item-valor-unit" placeholder="Vlr. Unit." value="0,00">
+          <input type="text" id="venda-item-pedido" placeholder="Nº do pedido" maxlength="15" title="Número do pedido de compra do cliente (xPed na NF-e)">
+          <input type="text" id="venda-item-pedido-item" placeholder="Item nº" maxlength="6" inputmode="numeric" title="Número do item no pedido do cliente (nItemPed, até 6 dígitos)">
           <button type="button" class="btn-secondary" onclick="adicionarItemVenda()">Adicionar</button>
         </div>
       </fieldset>
       <table class="data-table">
-        <thead><tr><th>Descrição</th><th>Qtd.</th><th>Vlr. Unit.</th><th>Vlr. Total</th><th></th></tr></thead>
-        <tbody id="itens-venda-tbody"><tr><td colspan="5" class="vazio">Nenhum item adicionado.</td></tr></tbody>
+        <thead><tr><th>Descrição</th><th>Nº pedido</th><th>Qtd.</th><th>Vlr. Unit.</th><th>Vlr. Total</th><th></th></tr></thead>
+        <tbody id="itens-venda-tbody"><tr><td colspan="6" class="vazio">Nenhum item adicionado.</td></tr></tbody>
       </table>
     </div>
 
@@ -5774,11 +5778,16 @@ function adicionarItemVenda() {
     quantidade: quantidade,
     valor_unitario: valorUnit,
     valor_total: quantidade * valorUnit,
+    numero_pedido: (document.getElementById('venda-item-pedido').value || '').trim(),
+    item_pedido: (document.getElementById('venda-item-pedido-item').value || '').replace(/\D/g, '').slice(0, 6),
   });
   atualizarTabelaItensVendaTemp();
   limparProdutoSelecionadoVenda();
   document.getElementById('venda-item-quantidade').value = '1';
   document.getElementById('venda-item-valor-unit').value = '0,00';
+  // mantém o nº do pedido preenchido: normalmente vários itens vêm do mesmo pedido
+  const itemPed = document.getElementById('venda-item-pedido-item');
+  if (itemPed) itemPed.value = '';
 }
 
 function removerItemVenda(indice) {
@@ -5791,12 +5800,13 @@ function atualizarTabelaItensVendaTemp() {
   tbody.innerHTML = itensVendaTemp.map((it, idx) => `
     <tr>
       <td>${escapeHtml(it.descricao)}</td>
+      <td>${it.numero_pedido ? escapeHtml(it.numero_pedido) + (it.item_pedido ? ' / ' + escapeHtml(it.item_pedido) : '') : '-'}</td>
       <td>${it.quantidade}</td>
       <td>${formatarMoeda(it.valor_unitario)}</td>
       <td>${formatarMoeda(it.valor_total)}</td>
       <td class="acoes"><button type="button" onclick="removerItemVenda(${idx})" title="Remover">&#128465;</button></td>
     </tr>
-  `).join('') || '<tr><td colspan="5" class="vazio">Nenhum item adicionado.</td></tr>';
+  `).join('') || '<tr><td colspan="6" class="vazio">Nenhum item adicionado.</td></tr>';
   atualizarPesoTotalVenda();
 }
 
