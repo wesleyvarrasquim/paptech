@@ -1560,7 +1560,9 @@ function abrirFormPessoa(tipo, id) {
     const valor = registro ? (registro[chave] || '') : '';
     const botaoBuscar = chave === 'cep'
       ? `<button type="button" class="btn-secondary" onclick="buscarCepForm()">Buscar</button>`
-      : '';
+      : (chave === 'cnpj'
+        ? `<button type="button" class="btn-secondary" id="botao-buscar-cnpj" onclick="buscarCnpjForm()" title="Puxa razão social, endereço, telefone e Inscrição Estadual pelo CNPJ">Buscar CNPJ</button>`
+        : '');
     return `
       <div class="campo">
         <label>${rotulo}</label>
@@ -1596,6 +1598,123 @@ function abrirFormPessoa(tipo, id) {
       </div>
     </form>
   `);
+}
+
+/* ---------- consulta de CNPJ (dados cadastrais + Inscrição Estadual) ----------
+   Não existe API oficial e gratuita do Sintegra (cada estado tem o seu site, com captcha).
+   Usamos a API pública da CNPJ.ws, que traz os dados da Receita e as inscrições estaduais
+   (base dos cadastros estaduais/Sintegra), e a BrasilAPI como reserva (sem I.E.). */
+function cnpjValido(cnpj) {
+  const d = String(cnpj || '').replace(/\D/g, '');
+  if (d.length !== 14 || /^(\d)\1+$/.test(d)) return false;
+  const calc = (base) => {
+    let soma = 0, peso = base.length - 7;
+    for (const c of base) { soma += Number(c) * peso--; if (peso < 2) peso = 9; }
+    const r = soma % 11;
+    return r < 2 ? 0 : 11 - r;
+  };
+  return calc(d.slice(0, 12)) === Number(d[12]) && calc(d.slice(0, 13)) === Number(d[13]);
+}
+
+function formatarCnpjTexto(d) {
+  return String(d).replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+}
+
+async function consultarCnpjOnline(cnpj) {
+  // 1) CNPJ.ws — com inscrições estaduais
+  try {
+    const r = await fetch(`https://publica.cnpj.ws/cnpj/${cnpj}`);
+    if (r.status === 404) return { naoEncontrado: true };
+    if (r.ok) {
+      const d = await r.json();
+      const e = d.estabelecimento || {};
+      const uf = (e.estado && e.estado.sigla) || '';
+      const ies = Array.isArray(e.inscricoes_estaduais) ? e.inscricoes_estaduais : [];
+      const daUf = ies.filter(i => i && i.inscricao_estadual && (!i.estado || !i.estado.sigla || i.estado.sigla === uf));
+      const ie = daUf.find(i => i.ativo) || daUf[0] || null;
+      return {
+        fonte: 'CNPJ.ws',
+        razao_social: d.razao_social || '',
+        nome_fantasia: e.nome_fantasia || '',
+        cep: String(e.cep || '').replace(/\D/g, ''),
+        endereco: [e.tipo_logradouro, e.logradouro].filter(Boolean).join(' '),
+        numero: e.numero || '',
+        bairro: e.bairro || '',
+        cidade: (e.cidade && e.cidade.nome) || '',
+        uf,
+        telefone: [e.ddd1, e.telefone1].filter(Boolean).join(' ').trim(),
+        email: (e.email || '').toLowerCase(),
+        situacao: e.situacao_cadastral || '',
+        inscricao_estadual: ie ? String(ie.inscricao_estadual) : '',
+        ie_ativa: ie ? !!ie.ativo : null,
+      };
+    }
+  } catch (erro) { /* tenta a reserva */ }
+  // 2) BrasilAPI — reserva, não traz I.E.
+  const r2 = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpj}`);
+  if (r2.status === 404) return { naoEncontrado: true };
+  if (!r2.ok) throw new Error('indisponivel');
+  const d2 = await r2.json();
+  return {
+    fonte: 'BrasilAPI',
+    razao_social: d2.razao_social || '',
+    nome_fantasia: d2.nome_fantasia || '',
+    cep: String(d2.cep || '').replace(/\D/g, ''),
+    endereco: d2.logradouro || '',
+    numero: d2.numero || '',
+    bairro: d2.bairro || '',
+    cidade: d2.municipio || '',
+    uf: d2.uf || '',
+    telefone: d2.ddd_telefone_1 || '',
+    email: (d2.email || '').toLowerCase(),
+    situacao: d2.descricao_situacao_cadastral || '',
+    inscricao_estadual: '',
+    ie_ativa: null,
+  };
+}
+
+async function buscarCnpjForm() {
+  const campoCnpj = document.getElementById('campo-cnpj');
+  const cnpj = (campoCnpj.value || '').replace(/\D/g, '');
+  if (!cnpjValido(cnpj)) {
+    alert('Digite um CNPJ válido (14 dígitos) para buscar.');
+    return;
+  }
+  const botao = document.getElementById('botao-buscar-cnpj');
+  const textoOriginal = botao ? botao.textContent : '';
+  if (botao) { botao.disabled = true; botao.textContent = 'Buscando...'; }
+  try {
+    const d = await consultarCnpjOnline(cnpj);
+    if (d.naoEncontrado) { alert('CNPJ não encontrado na base consultada.'); return; }
+    const preencher = (chave, valor) => {
+      const el = document.getElementById('campo-' + chave);
+      if (el && valor) el.value = valor;
+    };
+    campoCnpj.value = formatarCnpjTexto(cnpj);
+    preencher('razao_social', d.razao_social);
+    preencher('nome_fantasia', d.nome_fantasia);
+    preencher('inscricao_estadual', d.inscricao_estadual);
+    preencher('cep', d.cep);
+    preencher('endereco', d.endereco);
+    preencher('numero', d.numero);
+    preencher('bairro', d.bairro);
+    preencher('cidade', d.cidade);
+    preencher('uf', d.uf);
+    preencher('telefone', d.telefone);
+    const campoEmail = document.getElementById('campo-email');
+    if (campoEmail && !campoEmail.value) campoEmail.value = d.email || '';
+    const avisos = [];
+    if (d.situacao && !/ativ/i.test(d.situacao)) avisos.push(`Situação cadastral: ${d.situacao}`);
+    if (d.inscricao_estadual && d.ie_ativa === false) avisos.push('A Inscrição Estadual encontrada consta como NÃO ativa.');
+    if (!d.inscricao_estadual) avisos.push(d.fonte === 'BrasilAPI'
+      ? 'Esta consulta não retornou a Inscrição Estadual (serviço de reserva) — preencha manualmente.'
+      : 'Nenhuma Inscrição Estadual encontrada para este CNPJ — se for contribuinte, preencha manualmente.');
+    alert('Dados importados (' + d.fonte + '). Confira antes de salvar.' + (avisos.length ? '\n\n' + avisos.join('\n') : ''));
+  } catch (erro) {
+    alert('Não foi possível consultar o CNPJ agora (serviço indisponível ou limite de consultas por minuto). Tente de novo em instantes.');
+  } finally {
+    if (botao) { botao.disabled = false; botao.textContent = textoOriginal; }
+  }
 }
 
 async function buscarCepForm() {
