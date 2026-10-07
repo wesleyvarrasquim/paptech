@@ -1999,6 +1999,142 @@ function imprimirEtiquetaProduto(produtoId) {
   w.document.close();
 }
 
+/* ===== Tela de códigos similares (botão 🔗 no produto) =====
+   Trabalha direto sobre produto.similares ({codigo, marca, descricao}) e grava a cada alteração.
+   Os cadastros antigos (lista de textos ou sem descrição) continuam funcionando. */
+let similaresTelaProdutoId = null;
+let similaresTelaSelecionado = -1; // índice real em produto.similares
+let similaresTelaEditando = null;  // null = fechado | -1 = novo | n = editando o índice n
+
+function similaresDoProduto(produto) {
+  return (Array.isArray(produto && produto.similares) ? produto.similares : []).map(it =>
+    typeof it === 'string' ? { codigo: it, marca: '', descricao: '' }
+      : { codigo: (it && it.codigo) || '', marca: (it && it.marca) || '', descricao: (it && it.descricao) || '' });
+}
+
+function abrirSimilaresProduto(produtoId) {
+  similaresTelaProdutoId = produtoId;
+  similaresTelaSelecionado = -1;
+  similaresTelaEditando = null;
+  renderSimilaresTela();
+}
+
+function renderSimilaresTela(filtro) {
+  const produto = loadList('produtos').find(p => p.id === similaresTelaProdutoId);
+  if (!produto) { fecharModal(); return; }
+  const podeEditar = podeCadastrar('produtos');
+  const lista = similaresDoProduto(produto);
+  const termo = normalizarTextoBusca(filtro != null ? filtro : ((document.getElementById('sim-pesquisa') || {}).value || ''));
+  const linhas = lista.map((it, idx) => ({ it, idx })).filter(({ it }) =>
+    !termo || normalizarTextoBusca(`${it.codigo} ${it.marca} ${it.descricao}`).includes(termo));
+  const editando = similaresTelaEditando;
+  const atual = editando != null && editando >= 0 ? lista[editando] : { codigo: '', marca: '', descricao: '' };
+
+  abrirModal(`
+    <style>
+      .sim-tabela tr.sel td { background: #cfe8cf; }
+      .sim-tabela tbody tr { cursor: pointer; }
+    </style>
+    <h2>Códigos Similares de Produtos</h2>
+    <div style="margin-bottom:10px">
+      <div style="color:#c62828;font-weight:700;font-size:13px">Produto Principal</div>
+      <div style="color:#1a3a8a;font-weight:700">${escapeHtml(produto.cod_interno || produto.cod_original || '-')} - ${escapeHtml(produto.descricao || '')}</div>
+    </div>
+    ${podeEditar ? `<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+      <button class="btn-primary" onclick="novoSimilarTela()">&#128196; Novo</button>
+      <button class="btn-secondary" onclick="editarSimilarTela()">&#9998; Editar</button>
+      <button class="btn-secondary" onclick="eliminarSimilarTela()" style="color:var(--perigo)">&#10006; Eliminar</button>
+    </div>` : ''}
+    ${editando != null ? `
+      <fieldset class="item-fieldset" style="margin-bottom:10px">
+        <legend>${editando === -1 ? 'Novo similar' : 'Editar similar'}</legend>
+        <div class="item-linha">
+          <input type="text" id="sim-codigo" placeholder="Código similar *" value="${escapeHtml(atual.codigo)}" style="flex:1;min-width:130px">
+          <input type="text" id="sim-marca" placeholder="Marca" value="${escapeHtml(atual.marca)}" style="flex:1;min-width:100px">
+          <input type="text" id="sim-descricao" placeholder="Descrição do similar" value="${escapeHtml(atual.descricao)}" style="flex:2;min-width:180px">
+          <button type="button" class="btn-primary" onclick="salvarSimilarTela()">Gravar</button>
+          <button type="button" class="btn-secondary" onclick="cancelarSimilarTela()">Cancelar</button>
+        </div>
+      </fieldset>` : ''}
+    <div style="max-height:320px;overflow:auto;border:1px solid var(--borda);border-radius:8px">
+      <table class="data-table sim-tabela">
+        <thead><tr><th>Meu Código</th><th>Similar</th><th>Marca</th><th>Descrição do Similar</th></tr></thead>
+        <tbody>${linhas.map(({ it, idx }) => `
+          <tr class="${idx === similaresTelaSelecionado ? 'sel' : ''}" onclick="selecionarSimilarTela(${idx})" ondblclick="selecionarSimilarTela(${idx}); editarSimilarTela()">
+            <td>${escapeHtml(produto.cod_interno || '-')}</td>
+            <td>${escapeHtml(it.codigo)}</td>
+            <td>${escapeHtml(it.marca || '-')}</td>
+            <td>${escapeHtml(it.descricao || '-')}</td>
+          </tr>`).join('') || `<tr><td colspan="4" class="vazio">${lista.length ? 'Nenhum similar encontrado na pesquisa.' : 'Nenhum código similar cadastrado.'}</td></tr>`}</tbody>
+      </table>
+    </div>
+    <div class="campo" style="margin-top:10px">
+      <label>Pesquisa</label>
+      <input type="text" id="sim-pesquisa" value="${escapeHtml(filtro != null ? filtro : '')}" oninput="renderSimilaresTelaMantendoFoco(this.value)" placeholder="Código, marca ou descrição...">
+    </div>
+    <div style="margin-top:12px"><button class="btn-secondary" onclick="fecharModal()">&#10162; Fechar</button></div>
+  `);
+  if (editando != null) { const c = document.getElementById('sim-codigo'); if (c) c.focus(); }
+}
+
+function renderSimilaresTelaMantendoFoco(valor) {
+  renderSimilaresTela(valor);
+  const el = document.getElementById('sim-pesquisa');
+  if (el) { el.focus(); el.setSelectionRange(valor.length, valor.length); }
+}
+
+function selecionarSimilarTela(idx) {
+  similaresTelaSelecionado = idx;
+  document.querySelectorAll('.sim-tabela tbody tr').forEach(tr => tr.classList.remove('sel'));
+  const linhas = document.querySelectorAll('.sim-tabela tbody tr');
+  linhas.forEach(tr => { if (tr.getAttribute('onclick') === `selecionarSimilarTela(${idx})`) tr.classList.add('sel'); });
+}
+
+function novoSimilarTela() { similaresTelaEditando = -1; renderSimilaresTela(); }
+
+function editarSimilarTela() {
+  if (similaresTelaSelecionado < 0) { alert('Selecione um similar na lista para editar.'); return; }
+  similaresTelaEditando = similaresTelaSelecionado;
+  renderSimilaresTela();
+}
+
+function cancelarSimilarTela() { similaresTelaEditando = null; renderSimilaresTela(); }
+
+function salvarSimilarTela() {
+  const codigo = document.getElementById('sim-codigo').value.trim();
+  const marca = document.getElementById('sim-marca').value.trim();
+  const descricao = document.getElementById('sim-descricao').value.trim();
+  if (!codigo) { alert('Informe o código similar.'); return; }
+  const produtos = loadList('produtos');
+  const produto = produtos.find(p => p.id === similaresTelaProdutoId);
+  if (!produto) return;
+  const lista = similaresDoProduto(produto);
+  const duplicado = lista.some((it, i) => i !== similaresTelaEditando &&
+    normalizarTextoBusca(it.codigo) === normalizarTextoBusca(codigo) && normalizarTextoBusca(it.marca) === normalizarTextoBusca(marca));
+  if (duplicado) { alert('Esse código similar (com essa marca) já está cadastrado.'); return; }
+  if (similaresTelaEditando === -1) { lista.push({ codigo, marca, descricao }); similaresTelaSelecionado = lista.length - 1; }
+  else lista[similaresTelaEditando] = { codigo, marca, descricao };
+  produto.similares = lista;
+  saveList('produtos', produtos);
+  similaresTelaEditando = null;
+  renderSimilaresTela();
+}
+
+function eliminarSimilarTela() {
+  if (similaresTelaSelecionado < 0) { alert('Selecione um similar na lista para eliminar.'); return; }
+  const produtos = loadList('produtos');
+  const produto = produtos.find(p => p.id === similaresTelaProdutoId);
+  if (!produto) return;
+  const lista = similaresDoProduto(produto);
+  const alvo = lista[similaresTelaSelecionado];
+  if (!alvo || !confirm(`Eliminar o similar "${alvo.codigo}"${alvo.marca ? ' (' + alvo.marca + ')' : ''}?`)) return;
+  lista.splice(similaresTelaSelecionado, 1);
+  produto.similares = lista;
+  saveList('produtos', produtos);
+  similaresTelaSelecionado = -1;
+  renderSimilaresTela();
+}
+
 function renderProdutos() {
   const container = document.getElementById('sec-produtos');
   const podeEditarProdutos = podeCadastrar('produtos');
@@ -2054,6 +2190,7 @@ function atualizarTabelaProdutos() {
       <td class="acoes" onclick="event.stopPropagation()">
         <button onclick="abrirFormProduto(${p.id})" title="${podeEditarProdutos ? 'Ver / Editar todos os dados' : 'Ver dados completos'}">${podeEditarProdutos ? '&#9998;' : '&#128065;'}</button>
         <button onclick="abrirUltimoMovimentoProduto(${p.id})" title="Ver última compra, última venda e devolução ao fornecedor">&#128337;</button>
+        <button onclick="abrirSimilaresProduto(${p.id})" title="Códigos similares do produto">&#128279;</button>
         <button onclick="abrirEtiquetaProduto(${p.id})" title="Imprimir etiqueta com código interno, descrição, locação e código de barras">&#127991;</button>
         ${podeEditarProdutos ? `
           <button onclick="clonarProduto(${p.id})" title="Clonar item">&#128203;</button>
@@ -2242,7 +2379,7 @@ function abrirFormProduto(id) {
   const camposGeralRestante = CAMPOS_PRODUTO_GERAL.slice(2).map(def => renderCampoProduto(def, registroParaCamposGeral)).join('');
 
   similaresProdutoTemp = registro && Array.isArray(registro.similares)
-    ? registro.similares.map(item => typeof item === 'string' ? { codigo: item, marca: '' } : { codigo: (item && item.codigo) || '', marca: (item && item.marca) || '' })
+    ? registro.similares.map(item => typeof item === 'string' ? { codigo: item, marca: '' } : { codigo: (item && item.codigo) || '', marca: (item && item.marca) || '', descricao: (item && item.descricao) || '' })
     : [];
   fotoProdutoTemp = registro && registro.foto_base64 ? registro.foto_base64 : null;
 
