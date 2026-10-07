@@ -2022,7 +2022,8 @@ function abrirSimilaresProduto(produtoId) {
 function renderSimilaresTela(filtro) {
   const produto = loadList('produtos').find(p => p.id === similaresTelaProdutoId);
   if (!produto) { fecharModal(); return; }
-  const podeEditar = podeCadastrar('produtos');
+  // quem tem acesso a Produtos (inclusive só "Visualizar") pode adicionar, editar e excluir similares
+  const podeEditar = temPermissao('produtos');
   const lista = similaresDoProduto(produto);
   const termo = normalizarTextoBusca(filtro != null ? filtro : ((document.getElementById('sim-pesquisa') || {}).value || ''));
   const linhas = lista.map((it, idx) => ({ it, idx })).filter(({ it }) =>
