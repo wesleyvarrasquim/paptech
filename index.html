@@ -2764,6 +2764,18 @@ function salvarProduto(event, id) {
   dados.foto_base64 = fotoProdutoTemp || '';
 
   const lista = loadList('produtos');
+  // Bloqueia cadastro repetido: mesmo código do fabricante (cod_original) E mesmos códigos similares.
+  const chaveSimilares = prod => codigosSimilares(prod).map(c => normalizarTextoBusca(c)).filter(Boolean).sort().join('|');
+  const fabricanteNovo = normalizarTextoBusca(dados.cod_original || '');
+  if (fabricanteNovo) {
+    const repetido = lista.find(p => p.id !== id &&
+      normalizarTextoBusca(p.cod_original || '') === fabricanteNovo &&
+      chaveSimilares(p) === chaveSimilares(dados));
+    if (repetido) {
+      alert(`Este item já está cadastrado: ${repetido.cod_interno || '-'} - ${repetido.descricao || ''}\n\nO código do fabricante (${dados.cod_original}) e os códigos similares são iguais. O cadastro não foi salvo.`);
+      return false;
+    }
+  }
   if (id) {
     const idx = lista.findIndex(p => p.id === id);
     lista[idx] = { ...lista[idx], ...dados };
