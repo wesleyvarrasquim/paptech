@@ -2331,7 +2331,7 @@ function renderProdutos() {
     <div class="prod-lista-scroll">
       <table class="data-table tabela-produtos">
         <thead>
-          <tr><th>Código</th><th>Original</th><th>Fabricante</th><th>Descrição</th><th>Local</th><th>Marca</th><th style="text-align:right">Preço Venda</th><th style="text-align:right">Estoque</th></tr>
+          <tr><th>Código</th><th>Original</th><th>Fabricante</th><th>Descrição</th><th>Local</th><th>Marca</th><th style="text-align:right">Custo</th><th style="text-align:right">Preço Venda</th><th style="text-align:right">Estoque</th></tr>
         </thead>
         <tbody id="produtos-tbody"></tbody>
       </table>
@@ -2426,6 +2426,7 @@ function atualizarTabelaProdutos() {
       <td class="desc" title="${escapeHtml(p.descricao)}">${escapeHtml(p.descricao)}</td>
       <td class="corte">${escapeHtml(p.localizacao || '')}</td>
       <td class="corte">${escapeHtml(p.marca || '')}</td>
+      <td class="num">${formatarMoeda(custoRealProduto(p))}</td>
       <td class="num">${formatarMoeda(p.valor_venda)}</td>
       <td class="${est > 0 ? 'est-pos' : 'est-neg'}">${est}</td>
     </tr>`;
@@ -2435,9 +2436,9 @@ function atualizarTabelaProdutos() {
     ? 'Nenhum produto encontrado para essa busca.'
     : 'Nenhum produto cadastrado.';
   const rodape = lista.length > mostrar.length
-    ? `<tr><td colspan="8" class="vazio">Mostrando ${mostrar.length} de ${lista.length}. <button type="button" class="btn-secondary" onclick="produtosMostrarMais()">Mostrar mais</button> ou refine a pesquisa.</td></tr>`
+    ? `<tr><td colspan="9" class="vazio">Mostrando ${mostrar.length} de ${lista.length}. <button type="button" class="btn-secondary" onclick="produtosMostrarMais()">Mostrar mais</button> ou refine a pesquisa.</td></tr>`
     : '';
-  tbody.innerHTML = (linhas + rodape) || `<tr><td colspan="8" class="vazio">${mensagemVazio}</td></tr>`;
+  tbody.innerHTML = (linhas + rodape) || `<tr><td colspan="9" class="vazio">${mensagemVazio}</td></tr>`;
   if (produtoListaSelecionado && !todos.some(p => p.id === produtoListaSelecionado)) produtoListaSelecionado = null;
   atualizarBarraProdutos();
 }
