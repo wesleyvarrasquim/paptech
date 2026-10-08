@@ -95,6 +95,28 @@
   .data-table th { background: #F0F6F0; color: var(--accent-2); text-transform: uppercase; font-size: 11.5px; letter-spacing: .6px; }
   .data-table tr:hover td { background: rgba(46,125,50,0.05); }
   .data-table tr.linha-clicavel { cursor: pointer; }
+  .prod-barra { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; padding: 8px; background: var(--painel); border: 1px solid var(--borda); border-radius: 12px; }
+  .prod-barra button { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 66px; padding: 6px 8px; border: 1px solid transparent; border-radius: 8px; background: none; cursor: pointer; font-size: 11.5px; color: var(--texto); }
+  .prod-barra button span { font-size: 20px; line-height: 1.1; }
+  .prod-barra button:hover:not(:disabled) { background: rgba(46,125,50,0.1); border-color: rgba(46,125,50,0.35); }
+  .prod-barra button:disabled { opacity: .4; cursor: not-allowed; }
+  .prod-filtros { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; margin-bottom: 12px; }
+  .prod-filtros .campo { margin: 0; }
+  .prod-filtros .busca-grande { flex: 1 1 320px; max-width: 520px; }
+  .prod-filtros label.chk { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+  .prod-total { margin-left: auto; font-size: 13px; color: var(--texto-suave); text-align: right; }
+  .prod-total strong { display: block; font-size: 18px; color: #c62828; }
+  .prod-lista-scroll { max-height: 62vh; overflow: auto; border: 1px solid var(--borda); border-radius: 12px; background: var(--painel); }
+  .prod-lista-scroll .data-table { border: none; border-radius: 0; }
+  .prod-lista-scroll thead th { position: sticky; top: 0; z-index: 1; }
+  .tabela-produtos td, .tabela-produtos th { padding: 6px 10px; white-space: nowrap; }
+  .tabela-produtos td.desc { max-width: 420px; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+  .tabela-produtos td.corte { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+  .tabela-produtos td.num { text-align: right; }
+  .tabela-produtos tbody tr:nth-child(even) td { background: rgba(46,125,50,0.04); }
+  .tabela-produtos tbody tr.sel td { background: #cfe8cf !important; }
+  .tabela-produtos td.est-neg { background: #f7b3b3 !important; text-align: right; font-weight: 700; }
+  .tabela-produtos td.est-pos { background: #b6e8b6 !important; text-align: right; font-weight: 700; }
   .tags-lista { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; min-height: 10px; }
   .tag-similar { display: inline-flex; align-items: center; gap: 6px; background: rgba(46,125,50,0.1); border: 1px solid rgba(46,125,50,0.35); color: var(--accent-2); border-radius: 999px; padding: 4px 10px; font-size: 12.5px; }
   .tag-similar button { background: none; border: none; color: var(--accent-2); cursor: pointer; font-size: 14px; line-height: 1; padding: 0; }
@@ -1802,6 +1824,7 @@ const CAMPOS_PRODUTO_GERAL = [
   ['localizacao', 'Localização no Estoque', 'text'],
   ['status', 'Status', 'select', ['Ativo', 'Inativo', 'Descontinuado']],
   ['tipo_produto', 'Tipo', 'select', ['Revenda', 'Industrializado']],
+  ['classe_item', 'Classe do Item', 'select', ['Outros', 'Mat. Prima', 'Acabado', 'Consumo']],
   ['observacao', 'Observação', 'textarea'],
   ['informacao_adicional', 'Informação Adicional', 'text'],
   ['valor_custo', 'Valor de Custo (R$)', 'text'],
@@ -1881,6 +1904,10 @@ function filtrarProdutosPorTermo(produtos, termoBusca) {
     const alvo = normalizarTextoBusca([
       p.cod_interno || '',
       p.cod_original || '',
+      p.fabricante || '',
+      p.marca || '',
+      p.localizacao || '',
+      p.gtin_venda || '',
       p.descricao || '',
       textoSimilares(p),
     ].join(' '));
@@ -2255,76 +2282,164 @@ function eliminarSimilarTela() {
   renderSimilaresTela();
 }
 
+let produtoListaSelecionado = null; // id do produto marcado na lista
+let produtosFiltroTipo = 'Todos';
+let produtosFiltroClasse = 'Todos';
+let produtosSomenteEstoque = false;
+let produtosLimiteLinhas = 300; // evita montar milhares de linhas de uma vez
+
 function renderProdutos() {
   const container = document.getElementById('sec-produtos');
   const podeEditarProdutos = podeCadastrar('produtos');
+  const sel = (valor, atual) => valor === atual ? 'selected' : '';
 
   container.innerHTML = `
     <div class="section-header">
-      <h1>Produtos</h1>
-      ${podeEditarProdutos ? `
-        <div class="header-botoes">
-          <button class="btn-secondary" onclick="abrirMovimentoEstoque()">&#128230; Movimentar Estoque</button>
-          <button class="btn-primary" onclick="abrirFormProduto()">+ Cadastrar Produto</button>
-        </div>
-      ` : ''}
+      <h1>Cadastro de Mercadorias</h1>
     </div>
-    <div class="campo busca-produtos">
-      <label>Pesquisar por código ou descrição (use * para separar trechos, ex: parafuso*m6)</label>
-      <input type="text" id="produtos-busca" placeholder="Digite para buscar..." value="${escapeHtml(produtosFiltroAtual)}" oninput="onBuscaProdutosInput()" autocomplete="off">
+    <div class="prod-barra" id="produtos-barra">
+      <button onclick="produtosAtualizar()" title="Recarrega a lista"><span>&#128260;</span>Atualizar</button>
+      ${podeEditarProdutos ? `<button onclick="abrirFormProduto()" title="Cadastrar novo produto"><span>&#128196;</span>Novo</button>` : ''}
+      <button data-req="sel" onclick="produtosAcaoSelecionado('editar')" title="${podeEditarProdutos ? 'Ver / editar todos os dados' : 'Ver dados completos'}"><span>${podeEditarProdutos ? '&#9998;' : '&#128065;'}</span>${podeEditarProdutos ? 'Editar' : 'Ver'}</button>
+      ${podeEditarProdutos ? `<button data-req="sel" onclick="produtosAcaoSelecionado('clonar')" title="Clonar o item selecionado"><span>&#128203;</span>Repetir</button>
+      <button data-req="sel" onclick="produtosAcaoSelecionado('excluir')" title="Excluir o item selecionado"><span>&#10060;</span>Eliminar</button>
+      <button onclick="abrirMovimentoEstoque(produtoListaSelecionado || undefined)" title="Entrada/saída manual de estoque"><span>&#128230;</span>Movim.</button>` : ''}
+      <button data-req="sel" onclick="produtosAcaoSelecionado('similares')" title="Códigos similares do item selecionado"><span>&#128279;</span>Similares</button>
+      <button data-req="sel" onclick="produtosAcaoSelecionado('movimento')" title="Última compra, última venda e devolução"><span>&#128337;</span>Último mov.</button>
+      <button data-req="sel" onclick="produtosAcaoSelecionado('etiqueta')" title="Imprimir etiqueta"><span>&#127991;</span>Etiqueta</button>
     </div>
-    <div class="aviso" style="margin-bottom:12px">${podeEditarProdutos ? 'Clique no produto para ver todos os dados completos (estoque, impostos, fornecedor etc).' : 'Você tem acesso só para visualizar Produtos — clique no produto para ver os dados completos, sem poder alterar.'}</div>
-    <table class="data-table">
-      <thead>
-        <tr><th>Cód. Interno</th><th>Cód. Original</th><th>Similares</th><th>Descrição</th><th>Marca</th><th>Localização</th><th>Estoque</th><th>Custo</th><th>Valor de Venda</th><th></th></tr>
-      </thead>
-      <tbody id="produtos-tbody"></tbody>
-    </table>
+    <div class="prod-filtros">
+      <div class="campo busca-grande">
+        <label>Pesquisa — dica: use * para pesquisa detalhada (ex: parafuso*m6)</label>
+        <input type="text" id="produtos-busca" placeholder="Digite para buscar..." value="${escapeHtml(produtosFiltroAtual)}" oninput="onBuscaProdutosInput()" onkeydown="produtosTeclaBusca(event)" autocomplete="off">
+      </div>
+      <div class="campo">
+        <label>Tipo</label>
+        <select id="produtos-filtro-tipo" onchange="produtosMudouFiltro()">
+          <option ${sel('Todos', produtosFiltroTipo)}>Todos</option><option ${sel('Revenda', produtosFiltroTipo)}>Revenda</option><option ${sel('Industrializado', produtosFiltroTipo)}>Industrializado</option>
+        </select>
+      </div>
+      <div class="campo">
+        <label>Classe</label>
+        <select id="produtos-filtro-classe" onchange="produtosMudouFiltro()">
+          <option ${sel('Todos', produtosFiltroClasse)}>Todos</option><option ${sel('Outros', produtosFiltroClasse)}>Outros</option><option ${sel('Mat. Prima', produtosFiltroClasse)}>Mat. Prima</option><option ${sel('Acabado', produtosFiltroClasse)}>Acabado</option><option ${sel('Consumo', produtosFiltroClasse)}>Consumo</option>
+        </select>
+      </div>
+      <label class="chk"><input type="checkbox" id="produtos-so-estoque" ${produtosSomenteEstoque ? 'checked' : ''} onchange="produtosMudouFiltro()"> Somente itens no estoque?</label>
+      <div class="prod-total">Total de Registros:<strong id="produtos-total">0</strong></div>
+    </div>
+    <div class="prod-lista-scroll">
+      <table class="data-table tabela-produtos">
+        <thead>
+          <tr><th>Código</th><th>Original</th><th>Fabricante</th><th>Descrição</th><th>Local</th><th>Marca</th><th style="text-align:right">Preço Venda</th><th style="text-align:right">Estoque</th></tr>
+        </thead>
+        <tbody id="produtos-tbody"></tbody>
+      </table>
+    </div>
+    <div class="aviso" style="margin-top:10px">Clique para selecionar um item e use os botões acima. Duplo clique (ou Enter) abre o cadastro completo. Estoque em verde = disponível; em vermelho = zerado ou negativo.</div>
   `;
   atualizarTabelaProdutos();
 }
 
 function onBuscaProdutosInput() {
   produtosFiltroAtual = document.getElementById('produtos-busca').value;
+  produtosLimiteLinhas = 300;
   atualizarTabelaProdutos();
+}
+
+function produtosMudouFiltro() {
+  produtosFiltroTipo = document.getElementById('produtos-filtro-tipo').value;
+  produtosFiltroClasse = document.getElementById('produtos-filtro-classe').value;
+  produtosSomenteEstoque = document.getElementById('produtos-so-estoque').checked;
+  produtosLimiteLinhas = 300;
+  atualizarTabelaProdutos();
+}
+
+function produtosAtualizar() {
+  produtosLimiteLinhas = 300;
+  atualizarTabelaProdutos();
+}
+
+function produtosMostrarMais() {
+  produtosLimiteLinhas += 500;
+  atualizarTabelaProdutos();
+}
+
+function produtosTeclaBusca(ev) {
+  if (ev.key === 'Enter') { ev.preventDefault(); if (produtoListaSelecionado) produtosAcaoSelecionado('editar'); }
+  if (ev.key === 'ArrowDown') { ev.preventDefault(); produtosMoverSelecao(1); }
+  if (ev.key === 'ArrowUp') { ev.preventDefault(); produtosMoverSelecao(-1); }
+}
+
+function produtosMoverSelecao(passo) {
+  const linhas = [...document.querySelectorAll('#produtos-tbody tr[data-id]')];
+  if (!linhas.length) return;
+  let i = linhas.findIndex(tr => Number(tr.dataset.id) === produtoListaSelecionado);
+  i = Math.max(0, Math.min(linhas.length - 1, (i === -1 ? (passo > 0 ? 0 : linhas.length - 1) : i + passo)));
+  selecionarProdutoLista(Number(linhas[i].dataset.id));
+  linhas[i].scrollIntoView({ block: 'nearest' });
+}
+
+function selecionarProdutoLista(id) {
+  produtoListaSelecionado = id;
+  document.querySelectorAll('#produtos-tbody tr[data-id]').forEach(tr => tr.classList.toggle('sel', Number(tr.dataset.id) === id));
+  atualizarBarraProdutos();
+}
+
+function atualizarBarraProdutos() {
+  document.querySelectorAll('#produtos-barra button[data-req="sel"]').forEach(b => { b.disabled = !produtoListaSelecionado; });
+}
+
+function produtosAcaoSelecionado(acao) {
+  const id = produtoListaSelecionado;
+  if (!id) { alert('Selecione um produto na lista.'); return; }
+  if (acao === 'editar') abrirFormProduto(id);
+  else if (acao === 'clonar') clonarProduto(id);
+  else if (acao === 'excluir') excluirProduto(id);
+  else if (acao === 'similares') abrirSimilaresProduto(id);
+  else if (acao === 'movimento') abrirUltimoMovimentoProduto(id);
+  else if (acao === 'etiqueta') abrirEtiquetaProduto(id);
 }
 
 function atualizarTabelaProdutos() {
   const todos = loadList('produtos');
-  const lista = filtrarProdutosPorTermo(todos, produtosFiltroAtual);
+  let lista = filtrarProdutosPorTermo(todos, produtosFiltroAtual);
+  if (produtosFiltroTipo !== 'Todos') lista = lista.filter(p => (p.tipo_produto || 'Revenda') === produtosFiltroTipo);
+  if (produtosFiltroClasse !== 'Todos') lista = lista.filter(p => (p.classe_item || 'Outros') === produtosFiltroClasse);
+  if (produtosSomenteEstoque) lista = lista.filter(p => (Number(p.estoque_atual) || 0) > 0);
+  lista = lista.slice().sort((a, b) => String(a.descricao || '').localeCompare(String(b.descricao || ''), 'pt-BR', { sensitivity: 'base' }));
+
   const tbody = document.getElementById('produtos-tbody');
   if (!tbody) return;
+  const totalEl = document.getElementById('produtos-total');
+  if (totalEl) totalEl.textContent = lista.length.toLocaleString('pt-BR');
 
-  const podeEditarProdutos = podeCadastrar('produtos');
-  const linhas = lista.map(p => `
-    <tr class="linha-clicavel" onclick="abrirFormProduto(${p.id})">
+  const mostrar = lista.slice(0, produtosLimiteLinhas);
+  const linhas = mostrar.map(p => {
+    const est = Number(p.estoque_atual) || 0;
+    const sims = textoSimilares(p);
+    return `
+    <tr class="linha-clicavel ${p.id === produtoListaSelecionado ? 'sel' : ''}" data-id="${p.id}" title="${escapeHtml(sims ? 'Similares: ' + sims : '')}" onclick="selecionarProdutoLista(${p.id})" ondblclick="abrirFormProduto(${p.id})">
       <td>${escapeHtml(p.cod_interno)}</td>
-      <td>${escapeHtml(p.cod_original)}</td>
-      <td>${escapeHtml(textoSimilares(p)) || '-'}</td>
-      <td>${escapeHtml(p.descricao)}</td>
-      <td>${escapeHtml(p.marca || '-')}</td>
-      <td>${escapeHtml(p.localizacao || '-')}</td>
-      <td>${estoqueBadge(p)}</td>
-      <td>${formatarMoeda(custoRealProduto(p))}</td>
-      <td>${formatarMoeda(p.valor_venda)}</td>
-      <td class="acoes" onclick="event.stopPropagation()">
-        <button onclick="abrirFormProduto(${p.id})" title="${podeEditarProdutos ? 'Ver / Editar todos os dados' : 'Ver dados completos'}">${podeEditarProdutos ? '&#9998;' : '&#128065;'}</button>
-        <button onclick="abrirUltimoMovimentoProduto(${p.id})" title="Ver última compra, última venda e devolução ao fornecedor">&#128337;</button>
-        <button onclick="abrirSimilaresProduto(${p.id})" title="Códigos similares do produto">&#128279;</button>
-        <button onclick="abrirEtiquetaProduto(${p.id})" title="Imprimir etiqueta com código interno, descrição, locação e código de barras">&#127991;</button>
-        ${podeEditarProdutos ? `
-          <button onclick="clonarProduto(${p.id})" title="Clonar item">&#128203;</button>
-          <button onclick="abrirMovimentoEstoque(${p.id})" title="Movimentar estoque">&#128230;</button>
-          <button onclick="excluirProduto(${p.id})" title="Excluir">&#128465;</button>
-        ` : ''}
-      </td>
-    </tr>
-  `).join('');
+      <td class="corte">${escapeHtml(p.cod_original)}</td>
+      <td class="corte">${escapeHtml(p.fabricante || '')}</td>
+      <td class="desc" title="${escapeHtml(p.descricao)}">${escapeHtml(p.descricao)}</td>
+      <td class="corte">${escapeHtml(p.localizacao || '')}</td>
+      <td class="corte">${escapeHtml(p.marca || '')}</td>
+      <td class="num">${formatarMoeda(p.valor_venda)}</td>
+      <td class="${est > 0 ? 'est-pos' : 'est-neg'}">${est}</td>
+    </tr>`;
+  }).join('');
 
   const mensagemVazio = todos.length
     ? 'Nenhum produto encontrado para essa busca.'
     : 'Nenhum produto cadastrado.';
-  tbody.innerHTML = linhas || `<tr><td colspan="10" class="vazio">${mensagemVazio}</td></tr>`;
+  const rodape = lista.length > mostrar.length
+    ? `<tr><td colspan="8" class="vazio">Mostrando ${mostrar.length} de ${lista.length}. <button type="button" class="btn-secondary" onclick="produtosMostrarMais()">Mostrar mais</button> ou refine a pesquisa.</td></tr>`
+    : '';
+  tbody.innerHTML = (linhas + rodape) || `<tr><td colspan="8" class="vazio">${mensagemVazio}</td></tr>`;
+  if (produtoListaSelecionado && !todos.some(p => p.id === produtoListaSelecionado)) produtoListaSelecionado = null;
+  atualizarBarraProdutos();
 }
 
 function custoRealProduto(p) {
